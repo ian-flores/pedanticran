@@ -93,6 +93,18 @@ Common CRAN feedback → Rule ID mapping:
 | "Overall checktime" | SIZE-02 |
 | "URL" invalid/broken | MISC-02 |
 | "spelling" | MISC-03 |
+| "browser()" or "non-interactive debugger" | CODE-15 |
+| "sprintf" or "vsprintf" in compiled code | CODE-16 |
+| "Installation took CPU time" or "UseLTO" | CODE-17 |
+| "removed the failing tests" or "not the idea of tests" | CODE-18 |
+| "bool" / "true" / "false" keywords or C23 | COMP-01 |
+| "R_NO_REMAP" or "Rf_error" or bare API names | COMP-02 |
+| "non-API" entry points or "non-API calls to R" | COMP-03 |
+| "implicit" function declaration | COMP-04 |
+| "/bin/bash is not portable" or "bashism" | COMP-05 |
+| "CXX_STD" or "CXX11" or "CXX14" deprecated | COMP-06 |
+| "requires archived package" or dependency cascade | DEP-03 |
+| "GNU make" or Makefile portability | MISC-05 |
 
 ### Step 4: Produce Fixes
 
@@ -125,6 +137,11 @@ CRAN reviewers sometimes address only the most obvious issues and reject again f
 - If they flagged Title Case, also check single quotes and "for R"
 - If they flagged `print()`, also check for `cat()`
 - If they flagged one `options()` without `on.exit()`, check all settings changes
+- If they flagged C23 issues, also check for R_NO_REMAP problems and non-API entry points (all compiled code rules tend to cluster)
+- If they flagged configure script portability, also check Makefile portability (MISC-05)
+- If they flagged "Installation took CPU time", check for UseLTO in DESCRIPTION (CODE-17)
+- If they flagged dependency issues, check all Imports/Depends for archival risk (DEP-03) and suggest CRANhaven as emergency fallback
+- If they flagged test failures, verify the fix is to FIX the tests, not remove them (CODE-18 — this specific approach is always rejected)
 
 Tell the user: "CRAN mentioned X, but I also found Y and Z that could trigger the same reviewer on your next submission."
 
@@ -163,6 +180,24 @@ Guidelines for the comment:
 
 After presenting the analysis, ask:
 "Would you like me to apply these fixes now? I can run `/cran-fix` to handle the mechanical ones and walk you through the rest."
+
+## Common R 4.5+ Rejection Patterns
+
+R 4.5.0 (April 2025) introduced several new checks. If the rejection references compiled code issues, these are the most common:
+
+1. **C23 compilation failures** — `bool`, `true`, `false` are now keywords. Packages redefining them break. Fix: remove redefinitions or add `SystemRequirements: USE_C17`.
+
+2. **R_NO_REMAP in C++** — Bare R API names like `error()`, `length()` no longer compile. Fix: add `Rf_` prefix.
+
+3. **Non-API entry points** — Functions like `SET_TYPEOF`, `VECTOR_PTR` now generate WARNINGs (previously NOTEs). Fix: migrate to supported API.
+
+4. **sprintf deprecation** — `sprintf` in C/C++ is flagged on all platforms. Fix: use `snprintf`.
+
+5. **Configure script bashisms** — `/bin/bash` and bash-specific syntax in configure scripts. Fix: use `/bin/sh` and POSIX syntax.
+
+6. **C++11/C++14 deprecated** — `CXX_STD = CXX11` in Makevars generates notes. Fix: remove the line.
+
+These often appear together in packages with compiled code. If CRAN flags one, check for all of them.
 
 ## Handling Ambiguous Feedback
 

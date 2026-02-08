@@ -245,6 +245,100 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Remove SSL bypass. Fix certificate issues properly.
 - **Files**: `R/*.R`
 
+### CODE-15: No browser() Statements
+
+- **Severity**: REJECTION
+- **Rule**: Leftover `browser()` calls in package code will cause check failures under `--as-cran`. R 4.5+ traps non-interactive debugger invocations.
+- **CRAN says**: R CMD check flags browser() under `_R_CHECK_BROWSER_NONINTERACTIVE_` (enabled by --as-cran).
+- **Detection**: Grep for `browser()` in R/*.R function bodies (not in commented-out lines).
+- **Fix**: Remove all browser() calls. Use `debugonce()` interactively instead.
+- **Files**: `R/*.R`
+
+### CODE-16: sprintf/vsprintf in C/C++ Code
+
+- **Severity**: NOTE → REJECTION
+- **Rule**: R 4.5+ reports `sprintf` and `vsprintf` usage in compiled code on ALL platforms. macOS 13+ has deprecated sprintf entirely.
+- **CRAN says**: NOTE about sprintf/vsprintf usage in compiled code.
+- **Detection**: Grep src/*.c, src/*.cpp for `sprintf(` and `vsprintf(`.
+- **Fix**: Replace `sprintf` with `snprintf`, `vsprintf` with `vsnprintf`.
+- **Files**: `src/*.c`, `src/*.cpp`
+
+### CODE-17: UseLTO Causes CPU Time NOTE
+
+- **Severity**: NOTE (can cause rejection)
+- **Rule**: `UseLTO: yes` in DESCRIPTION triggers parallel compilation during install, causing "Installation took CPU time X times elapsed time" NOTE.
+- **CRAN says**: "Installation took CPU time 3.5 times elapsed time"
+- **Detection**: Check DESCRIPTION for `UseLTO` field.
+- **Fix**: Remove `UseLTO` from DESCRIPTION unless absolutely needed.
+- **Files**: `DESCRIPTION`
+
+### CODE-18: Do Not Remove Failing Tests
+
+- **Severity**: REJECTION
+- **Rule**: Removing failing tests instead of fixing them is always rejected. CRAN views this as evidence the package doesn't work correctly.
+- **CRAN says**: "Removed the failing tests which is not the idea of tests."
+- **Detection**: Cannot detect statically — informational rule for the respond skill.
+- **Fix**: Fix the underlying test failures. If test coverage increased, present covr evidence.
+- **Files**: `tests/**/*.R`
+
+---
+
+## Category: Compiled Code (C/C++/Fortran)
+
+### COMP-01: C23 Keyword Conflicts
+
+- **Severity**: REJECTION
+- **Rule**: R 4.5.0+ defaults to C23. `bool`, `true`, `false`, `nullptr` are now reserved C keywords. Code using these as variable names or redefining them will fail to compile.
+- **CRAN says**: Compiler error or `-Wkeyword-macro` warning under C23.
+- **Detection**: Grep src/*.c, src/*.h for `typedef.*bool`, `#define true`, `#define false`, `#define bool`, variable names `bool`, `true`, `false`.
+- **Fix**: Remove redefinitions. Use `<stdbool.h>` or rely on C23 built-in keywords. For backward compatibility, use `R_USE_C17` in SystemRequirements as opt-out.
+- **Files**: `src/*.c`, `src/*.h`
+
+### COMP-02: R_NO_REMAP Required for C++
+
+- **Severity**: REJECTION
+- **Rule**: R 4.5.0+ compiles C++ with `-DR_NO_REMAP` by default. Bare R API function names (`error()`, `length()`, `warning()`, `mkChar()`) must use `Rf_` prefix.
+- **CRAN says**: Compilation error from bare R API names in C++ code.
+- **Detection**: Grep src/*.cpp for bare R API calls: `\berror\(`, `\blength\(`, `\bwarning\(`, `\bmkChar\(`, `\balloc`, `\bprotect\(`, `\bunprotect\(` etc. (excluding lines that already use Rf_ prefix).
+- **Fix**: Replace `error(` with `Rf_error(`, `length(` with `Rf_length(`, `warning(` with `Rf_warning(`, `mkChar(` with `Rf_mkChar(`, etc.
+- **Files**: `src/*.cpp`, `src/*.h`
+
+### COMP-03: Non-API Entry Points
+
+- **Severity**: WARNING → REJECTION
+- **Rule**: R 4.5.0 upgraded some non-API entry point NOTEs to WARNINGs. R 4.6.0 will upgrade more. Using internal R API functions blocks submission.
+- **CRAN says**: "Found non-API calls to R: [function names]" (WARNING level).
+- **Detection**: Grep src/ for: IS_LONG_VEC, PRCODE, PRENV, PRVALUE, R_nchar, Rf_NonNullStringMatch, R_shallow_duplicate_attr, Rf_StringBlank, SET_TYPEOF, TRUELENGTH, XLENGTH_EX, XTRUELENGTH, VECTOR_PTR, R_tryWrap.
+- **Fix**: Replace with supported API equivalents. See Writing R Extensions manual.
+- **Files**: `src/*.c`, `src/*.cpp`
+
+### COMP-04: Implicit Function Declarations (C23)
+
+- **Severity**: REJECTION
+- **Rule**: C23 removes implicit function declarations. All functions must be declared before use (via #include or explicit declaration). GCC 14+/clang 16+ with C23 make this an error.
+- **CRAN says**: Compilation error about implicit function declaration.
+- **Detection**: Difficult to detect statically without compiling. Flag if `src/` exists with .c files as informational reminder.
+- **Fix**: Add proper `#include` directives for all used functions. Add function prototypes.
+- **Files**: `src/*.c`
+
+### COMP-05: Configure Script Portability
+
+- **Severity**: NOTE → REJECTION
+- **Rule**: Configure scripts must use `/bin/sh`, not `/bin/bash`. Bash-specific syntax (arrays, `[[`, `${var/pattern/replacement}`) is not allowed. R 4.5+ expanded bashism checking to autoconf-generated scripts.
+- **CRAN says**: "NOTE 'configure': /bin/bash is not portable"
+- **Detection**: Check configure, cleanup scripts for `#!/bin/bash` shebang. Grep for bashisms: `[[`, `]]`, `${var/`, `${var:`, arrays, `source` (use `.` instead).
+- **Fix**: Change shebang to `#!/bin/sh`. Replace bashisms with POSIX equivalents.
+- **Files**: `configure`, `cleanup`, `tools/*`
+
+### COMP-06: C++11/C++14 Specifications Deprecated
+
+- **Severity**: NOTE (becoming REJECTION in R 4.6.0)
+- **Rule**: `CXX_STD = CXX11` or `CXX_STD = CXX14` in Makevars is deprecated. R 4.6.0 will make these defunct. C++17 is the minimum, C++20 becoming default.
+- **CRAN says**: NOTE about deprecated C++ standard specification.
+- **Detection**: Grep src/Makevars and src/Makevars.win for `CXX_STD\s*=\s*CXX1[14]`.
+- **Fix**: Remove the `CXX_STD` line entirely (R defaults to C++17+). If C++17 features are needed explicitly, use `CXX_STD = CXX17`.
+- **Files**: `src/Makevars`, `src/Makevars.win`
+
 ---
 
 ## Category: Documentation
@@ -336,7 +430,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### SIZE-01: Package Tarball Should Be < 10MB
 
 - **Severity**: REJECTION
-- **Rule**: Source tarball should not exceed 10MB. Data and documentation each limited to 5MB.
+- **Rule**: Source tarball should not exceed 10MB. Data and documentation each limited to 5MB. **Updated Nov 2025:** Limit raised from 5MB to 10MB. Data and documentation each limited to 5MB. A modestly increased limit can be requested at submission for vendor files.
 - **Detection**: Check file sizes. Identify large files (data, vignette images, bundled libraries).
 - **Fix**: Compress data more aggressively. Move large datasets to separate data-only package. Reduce vignette image resolution. Remove unnecessary bundled files.
 - **Files**: Entire package
@@ -389,6 +483,15 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Wrap in `if (requireNamespace("pkg", quietly = TRUE)) { ... }`.
 - **Files**: `R/*.R`, `tests/**/*.R`, `vignettes/*.Rmd`
 
+### DEP-03: Monitor Dependency Health
+
+- **Severity**: RECOMMENDED
+- **Rule**: If any package in Imports/Depends has failing CRAN checks or has been archived, your package is at risk of cascading removal without warning.
+- **CRAN says**: "Archived on [date] as requires archived package '[name]'"
+- **Detection**: Check CRAN check status of all dependencies (informational — can't fully automate without network access).
+- **Fix**: Monitor dependency health at https://cran.r-project.org/web/checks/. Have contingency plans for critical dependencies. Consider CRANhaven (cranhaven.r-universe.dev) for emergency installs.
+- **Files**: `DESCRIPTION`
+
 ---
 
 ## Category: Internet & External Resources
@@ -398,7 +501,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Severity**: REJECTION
 - **Rule**: Package must not error or produce check warnings if internet resources are unavailable, changed, or rate-limited.
 - **Detection**: Find URL requests (httr, curl, download.file). Check if wrapped in tryCatch or similar error handling.
-- **Fix**: Wrap all network calls in `tryCatch()`. Return informative error messages. Use `\donttest{}` for examples requiring network.
+- **Fix**: Wrap all network calls in `tryCatch()`. Return informative error messages. Use `\donttest{}` for examples requiring network. **Important (R 4.5+ enforcement):** Graceful failure must extend to ALL downstream code in examples and vignettes, not just the network-calling function itself. If `read_data()` returns NULL on failure, any vignette code that uses the result must also handle the NULL case gracefully.
 - **Files**: `R/*.R`
 
 ### NET-02: Must Use HTTPS
@@ -455,6 +558,13 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Check last CRAN publication date (if already on CRAN).
 - **Fix**: Plan releases carefully. Batch fixes together.
 
+### SUB-07: CRAN Vacation Periods
+
+- **Severity**: INFORMATIONAL
+- **Rule**: CRAN has a winter break (~Dec 23 - Jan 7) during which no submissions are processed. Automated submission tools (devtools) during this period can trigger IP blocks.
+- **Detection**: Informational — flag if submitting in December/January.
+- **Fix**: Plan submissions to avoid the vacation period. If IP is blocked, email CRAN with your IP address.
+
 ---
 
 ## Category: Package Naming
@@ -508,3 +618,12 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Check for common development files not in `.Rbuildignore`.
 - **Fix**: Add entries to `.Rbuildignore`. Use `usethis::use_build_ignore()`.
 - **Files**: `.Rbuildignore`
+
+### MISC-05: Makefile Must Be POSIX-Compatible
+
+- **Severity**: REJECTION
+- **Rule**: Makefiles in src/ must use only POSIX make features, OR declare `SystemRequirements: GNU make`. Non-portable features: `ifeq`/`ifneq`, `${shell}`, `${wildcard}`, `+=`, `:=`, `$<`, `$^`, `.PHONY`.
+- **CRAN says**: Check warnings about non-portable Makefile features.
+- **Detection**: Grep src/Makevars for GNU make extensions. Check if SystemRequirements includes "GNU make".
+- **Fix**: Either use only POSIX make features, or add `SystemRequirements: GNU make` to DESCRIPTION.
+- **Files**: `src/Makevars`, `src/Makevars.win`, `DESCRIPTION`

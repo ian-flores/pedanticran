@@ -110,6 +110,28 @@ Also check `src/` if it exists:
 - C/C++: `abort(`, `exit(`, `assert(`
 - Fortran: `STOP`
 
+15. **CODE-15: browser()** — Find `browser()` calls in R source files (not in comments)
+
+16. **CODE-16: sprintf/vsprintf** — If `src/` exists, grep for `sprintf(` and `vsprintf(` in C/C++ files
+
+17. **CODE-17: UseLTO** — Check DESCRIPTION for `UseLTO` field
+
+#### 3b2. Compiled Code Checks (R 4.5+)
+
+If `src/` directory exists with C/C++/Fortran files, run these additional checks:
+
+1. **COMP-01: C23 keywords** — Grep src/*.c, src/*.h for `typedef.*bool`, `#define true`, `#define false`, `#define bool`, variables named `bool`, `true`, `false`
+
+2. **COMP-02: R_NO_REMAP** — Grep src/*.cpp for bare R API calls without Rf_ prefix: `\berror\(`, `\blength\(`, `\bwarning\(`, `\bmkChar\(`
+
+3. **COMP-03: Non-API entry points** — Grep src/ for: IS_LONG_VEC, PRCODE, PRENV, PRVALUE, R_nchar, SET_TYPEOF, TRUELENGTH, VECTOR_PTR
+
+4. **COMP-04: Implicit declarations** — Informational flag if src/ has .c files: remind about C23 implicit function declaration errors
+
+5. **COMP-05: Configure portability** — If configure or cleanup script exists, check for `#!/bin/bash` shebang and bashisms (`[[`, `]]`, `${var/`)
+
+6. **COMP-06: Deprecated C++ std** — Grep src/Makevars and src/Makevars.win for `CXX_STD\s*=\s*CXX1[14]`
+
 #### 3c. Documentation Checks
 
 1. **DOC-01: @return tags** — For every file in `R/` with `@export`, verify it also has `@return`
@@ -131,11 +153,13 @@ Also check `src/` if it exists:
 5. **SIZE-01: Large files** — Any files > 1MB? Any data files > 5MB?
 6. **PLAT-02: Binaries** — Any binary files in the source tree?
 7. **NET-02: HTTP URLs** — Any `http://` URLs (non-localhost)?
+8. **MISC-05: Makefile portability** — If src/Makevars exists, check for GNU make extensions (ifeq, ifneq, ${shell}, ${wildcard}) without `SystemRequirements: GNU make` in DESCRIPTION
 
 #### 3e. Dependency Checks
 
 1. **DEP-01: Dependencies** — Parse Depends/Imports/LinkingTo. Flag any that aren't obviously CRAN/Bioconductor packages.
 2. **DEP-02: Conditional Suggests** — Check if Suggests packages are used with `requireNamespace()`.
+3. **DEP-03: Dependency health** — Informational reminder to check CRAN status of all dependencies. Note cascading archival risk.
 
 ### Step 4: Produce the Report
 
@@ -167,6 +191,8 @@ Each issue:
 - [ ] cran-comments.md documents test environments and results
 - [ ] If update: reverse dependency check completed
 - [ ] If first submission: package name verified as available
+- [ ] If package has compiled code: tested against R-devel and R 4.5+ (C23/R_NO_REMAP changes)
+- [ ] If resubmitting during Dec/Jan: aware of CRAN vacation period (SUB-07)
 
 ### Summary
 X blocking issues, Y warnings, Z recommendations

@@ -85,6 +85,36 @@ Pattern: installed.packages()
 Replace: requireNamespace("pkg", quietly = TRUE) or appropriate alternative
 ```
 
+**FIX-BROWSER: Remove browser() calls** (CODE-15)
+```
+Search: R/*.R
+Pattern: browser() calls (not in comments)
+Replace: Remove the line
+```
+- Only remove standalone browser() calls, not browser() inside conditional debug blocks the user clearly wants
+
+**FIX-SPRINTF: Replace sprintf with snprintf in C/C++** (CODE-16)
+```
+Search: src/*.c, src/*.cpp
+Pattern: sprintf(
+Replace: snprintf(buffer, sizeof(buffer),
+```
+- Also replace vsprintf with vsnprintf
+
+**FIX-CXX-STD: Remove deprecated C++11/C++14 specification** (COMP-06)
+```
+Search: src/Makevars, src/Makevars.win
+Pattern: CXX_STD = CXX11 or CXX_STD = CXX14
+Replace: Remove the line entirely
+```
+
+**FIX-CONFIGURE-SHEBANG: Fix configure script shebang** (COMP-05)
+```
+Search: configure, cleanup
+Pattern: #!/bin/bash
+Replace: #!/bin/sh
+```
+
 #### Tier 2: Safe With Minor Judgment (Apply, But Show Changes)
 
 These have a clear correct direction but may need tweaking.
@@ -146,6 +176,22 @@ Fix: Remove "+ file LICENSE" and delete the LICENSE file
 ```
 - Do NOT fix for MIT or BSD licenses (they need it)
 
+**FIX-RF-PREFIX: Add Rf_ prefix to C++ R API calls** (COMP-02)
+```
+Search: src/*.cpp
+Pattern: bare R API names (error, length, warning, mkChar, etc.)
+Replace: Rf_ prefixed versions
+```
+- Common replacements: error→Rf_error, length→Rf_length, warning→Rf_warning, mkChar→Rf_mkChar, alloc→Rf_alloc, protect→Rf_protect, unprotect→Rf_unprotect
+- Show each change for review since some might be false positives (e.g., standard library `length` or `error`)
+
+**FIX-USELTO: Remove UseLTO from DESCRIPTION** (CODE-17)
+```
+Read: DESCRIPTION
+Pattern: UseLTO: yes (or TRUE)
+Remove: the entire UseLTO line
+```
+
 #### Tier 3: Requires User Input (Ask Before Fixing)
 
 These need human judgment. Ask the user what they want.
@@ -181,6 +227,31 @@ These need human judgment. Ask the user what they want.
 - If `system()` or `system2()` calls reference external programs
 - Propose `SystemRequirements` field value
 - Ask user to confirm
+
+**FIX-C23-KEYWORDS: Fix C23 keyword conflicts** (COMP-01)
+```
+Search: src/*.c, src/*.h
+Pattern: typedef.*bool, #define true, #define false, variables named bool/true/false
+```
+- Ask user: fix the code to use C23 native keywords, OR opt out with SystemRequirements: USE_C17?
+- If fixing: remove typedefs/defines, use <stdbool.h> or rely on C23 built-ins
+- If opting out: add `SystemRequirements: USE_C17` to DESCRIPTION
+
+**FIX-NONAPI: Replace non-API entry points** (COMP-03)
+```
+Search: src/*.c, src/*.cpp
+Pattern: IS_LONG_VEC, SET_TYPEOF, TRUELENGTH, VECTOR_PTR, etc.
+```
+- These require case-by-case API migration
+- Show each usage and suggest the documented alternative
+- Ask user to confirm each replacement
+
+**FIX-MAKEFILE: Fix non-portable Makefile** (MISC-05)
+```
+Search: src/Makevars, src/Makevars.win
+Pattern: ifeq, ifneq, ${shell}, ${wildcard}, +=, :=
+```
+- Ask user: rewrite using only POSIX make, OR add SystemRequirements: GNU make?
 
 ### Step 3: Regenerate Documentation
 
