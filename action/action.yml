@@ -1,0 +1,46 @@
+name: 'Pedantic CRAN Check'
+description: 'Static analysis for CRAN submission readiness. Catches the pedantic issues R CMD check misses.'
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Path to R package directory'
+    required: false
+    default: '.'
+  severity:
+    description: 'Minimum severity to report: error, warning, or note'
+    required: false
+    default: 'warning'
+  fail-on:
+    description: 'Fail the check on: error, warning, or note'
+    required: false
+    default: 'error'
+
+outputs:
+  issues:
+    description: 'Total number of issues found'
+    value: ${{ steps.check.outputs.issues }}
+  errors:
+    description: 'Number of blocking errors'
+    value: ${{ steps.check.outputs.errors }}
+  warnings:
+    description: 'Number of warnings'
+    value: ${{ steps.check.outputs.warnings }}
+  notes:
+    description: 'Number of notes'
+    value: ${{ steps.check.outputs.notes }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Run Pedantic CRAN checks
+      id: check
+      shell: bash
+      run: python "${{ github.action_path }}/check.py" --path "${{ inputs.path }}" --severity "${{ inputs.severity }}" --fail-on "${{ inputs.fail-on }}"

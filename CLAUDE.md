@@ -17,9 +17,24 @@ The knowledge base (`knowledge/cran-rules.md`) is the core IP. Keep it:
 - Each rule has: ID, severity, what CRAN says (verbatim), how to detect, how to fix
 - Updated when CRAN policies change
 
-## Phase Roadmap
+## GitHub Action
 
-1. **Phase 1** (current): Knowledge base + `/cran-audit` (read-only)
-2. **Phase 2**: `/cran-fix` (auto-remediation)
-3. **Phase 3**: `/cran-respond` (rejection email parser)
-4. **Phase 4**: GitHub Action wrapper
+The `action/` directory contains a standalone GitHub Action. Users add it to their R package CI:
+
+```yaml
+- uses: pedanticran/pedanticran@main
+  with:
+    path: '.'
+    severity: 'warning'   # report warnings and errors
+    fail-on: 'error'      # fail CI only on blocking issues
+```
+
+The Python checker (`action/check.py`) encodes knowledge base rules as static analysis.
+It runs without R and produces GitHub Actions annotations on the exact files/lines.
+
+## Phases
+
+1. Knowledge base + `/cran-audit` (read-only)
+2. `/cran-fix` (auto-remediation)
+3. `/cran-respond` (rejection email parser)
+4. GitHub Action (CI integration)
