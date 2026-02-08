@@ -35,6 +35,7 @@ mkdir -p "$TARGET/knowledge"
 # Copy files
 cp "$SCRIPT_DIR/skills/cran-audit.md" "$TARGET/skills/"
 cp "$SCRIPT_DIR/skills/cran-fix.md" "$TARGET/skills/"
+cp "$SCRIPT_DIR/skills/cran-respond.md" "$TARGET/skills/"
 cp "$SCRIPT_DIR/knowledge/cran-rules.md" "$TARGET/knowledge/"
 
 # Register skill trigger in skill-rules.json (if it exists and cran-audit isn't already there)
@@ -46,6 +47,16 @@ if [ -f "$RULES_FILE" ] && ! grep -q '"cran-audit"' "$RULES_FILE"; then
 import json, sys
 with open('$RULES_FILE') as f:
     data = json.load(f)
+data['skills']['cran-respond'] = {
+    'type': 'domain',
+    'enforcement': 'suggest',
+    'priority': 'high',
+    'description': 'Parse CRAN rejection emails and suggest fixes',
+    'promptTriggers': {
+        'keywords': ['cran rejected', 'cran rejection', 'cran response', 'cran-respond', 'cran feedback', 'cran said', 'cran email', 'cran reply', 'cran revision'],
+        'intentPatterns': ['(cran|CRAN).*?(reject|denied|feedback|said|reply|response|revision)', '(got|received).*?(reject|denied).*?cran', 'help.*?cran.*?(reject|feedback|response)']
+    }
+}
 data['skills']['cran-fix'] = {
     'type': 'domain',
     'enforcement': 'suggest',
@@ -76,6 +87,7 @@ echo ""
 echo "Installed:"
 echo "  $TARGET/skills/cran-audit.md"
 echo "  $TARGET/skills/cran-fix.md"
+echo "  $TARGET/skills/cran-respond.md"
 echo "  $TARGET/knowledge/cran-rules.md"
 echo ""
 echo "Usage: Open Claude Code in an R package directory and run /cran-audit"
