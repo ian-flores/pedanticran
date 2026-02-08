@@ -1,7 +1,5 @@
 # pedanticran
 
-CRAN is pedantic. Your tooling should be too.
-
 > **Warning**
 > This project is experimental. Rules may be incomplete, checks may have false positives, and the API may change without notice. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
 
@@ -11,7 +9,7 @@ Works as a **Claude Code plugin** (interactive) or a **GitHub Action** (CI).
 
 ## The problem
 
-~35% of first-time CRAN submissions are rejected for policy issues, not code issues. Things like:
+[~35% of first-time CRAN submissions](https://llrs.dev/post/2024/01/10/submission-cran-first-try/) are rejected for policy issues, not code issues. Things like:
 
 - `T` instead of `TRUE`
 - Title not in Title Case (but "a" should be lowercase, and don't capitalize after a colon if...)
@@ -36,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pedanticran/pedanticran@main
+      - uses: ian-flores/pedanticran@main
         with:
           severity: 'warning'
           fail-on: 'error'
@@ -48,10 +46,10 @@ No R installation required. Runs in seconds. Annotates the exact files and lines
 
 ```bash
 # Install globally (available in all projects)
-curl -fsSL https://raw.githubusercontent.com/pedanticran/pedanticran/main/install.sh | bash -s -- --global
+curl -fsSL https://raw.githubusercontent.com/ian-flores/pedanticran/main/install.sh | bash -s -- --global
 
 # Or install locally in your R package
-curl -fsSL https://raw.githubusercontent.com/pedanticran/pedanticran/main/install.sh | bash -s -- --local
+curl -fsSL https://raw.githubusercontent.com/ian-flores/pedanticran/main/install.sh | bash -s -- --local
 ```
 
 Then in Claude Code, inside your R package directory:
@@ -80,7 +78,7 @@ Every rule includes the verbatim CRAN rejection text, so you know exactly what r
 ## GitHub Action options
 
 ```yaml
-- uses: pedanticran/pedanticran@main
+- uses: ian-flores/pedanticran@main
   with:
     path: '.'          # Path to R package (default: repo root)
     severity: 'warning' # Minimum severity to report: error, warning, note
