@@ -166,35 +166,24 @@ def is_in_comment(line: str) -> bool:
     return stripped.startswith("#")
 
 
-def find_print_method_ranges(filepath: Path) -> list[tuple[int, int]]:
-    """Find line ranges of print/format/summary S3 methods and R6 print methods.
+def _find_function_body_ranges(filepath: Path, patterns: list[str]) -> list[tuple[int, int]]:
+    """Find line ranges of function bodies matching given definition patterns.
 
-    Returns [(start_line, end_line), ...] for functions where print()/cat() is legitimate.
+    Returns [(start_line, end_line), ...] where line numbers are 1-indexed.
     """
     try:
         lines = filepath.read_text(encoding="utf-8", errors="replace").splitlines()
     except Exception:
         return []
 
+    combined = re.compile('|'.join(patterns))
     ranges = []
-    # Patterns that indicate a print/format/summary method definition
-    method_patterns = [
-        r'^\s*print\.\w+\s*(<-|=)\s*function',       # print.foo <- function
-        r'^\s*format\.\w+\s*(<-|=)\s*function',       # format.foo <- function
-        r'^\s*summary\.\w+\s*(<-|=)\s*function',      # summary.foo <- function
-        r'^\s*str\.\w+\s*(<-|=)\s*function',           # str.foo <- function
-        r'^\s*show\s*(<-|=)\s*function',               # show <- function (S4)
-        r'^\s*print\s*=\s*function',                   # print = function (R6/RefClass)
-        r'^\s*format\s*=\s*function',                  # format = function (R6/RefClass)
-        r'#\'\s*@export\s*$',                          # marker — check next non-roxygen line
-    ]
-    combined = re.compile('|'.join(method_patterns[:-1]))
 
     i = 0
     while i < len(lines):
         line = lines[i]
         if combined.search(line):
-            # Found a method definition — find its closing brace
+            # Found a function definition — find its closing brace
             start = i + 1  # 1-indexed
             brace_depth = 0
             found_open = False
@@ -215,6 +204,39 @@ def find_print_method_ranges(filepath: Path) -> list[tuple[int, int]]:
             i += 1
 
     return ranges
+
+
+# Patterns for print/format/summary S3 methods and R6 print methods
+_PRINT_METHOD_PATTERNS = [
+    r'^\s*print\.\w+\s*(<-|=)\s*function',       # print.foo <- function
+    r'^\s*format\.\w+\s*(<-|=)\s*function',       # format.foo <- function
+    r'^\s*summary\.\w+\s*(<-|=)\s*function',      # summary.foo <- function
+    r'^\s*str\.\w+\s*(<-|=)\s*function',           # str.foo <- function
+    r'^\s*show\s*(<-|=)\s*function',               # show <- function (S4)
+    r'^\s*print\s*=\s*function',                   # print = function (R6/RefClass)
+    r'^\s*format\s*=\s*function',                  # format = function (R6/RefClass)
+]
+
+# Patterns for display/rendering helper functions where cat() is legitimate
+_DISPLAY_HELPER_PATTERNS = [
+    r'^\s*cat_\w+\s*(<-|=)\s*function',           # cat_line, cat_bullet, cat_rule
+    r'^\s*show_\w+\s*(<-|=)\s*function',           # show_regroups, show_query
+    r'^\s*display_\w+\s*(<-|=)\s*function',        # display_results, display_header
+    r'^\s*render_\w+\s*(<-|=)\s*function',         # render_line, render_output
+    r'^\s*draw_\w+\s*(<-|=)\s*function',           # draw_bar, draw_progress
+    r'^\s*print_\w+\s*(<-|=)\s*function',          # print_header, print_line
+    r'^\s*format_\w+\s*(<-|=)\s*function',         # format_line, format_output
+]
+
+
+def find_print_method_ranges(filepath: Path) -> list[tuple[int, int]]:
+    """Find line ranges of print/format/summary S3 methods and R6 print methods."""
+    return _find_function_body_ranges(filepath, _PRINT_METHOD_PATTERNS)
+
+
+def find_display_helper_ranges(filepath: Path) -> list[tuple[int, int]]:
+    """Find line ranges of display/rendering helper functions."""
+    return _find_function_body_ranges(filepath, _DISPLAY_HELPER_PATTERNS)
 
 
 # --- Encoding helpers ---
@@ -1047,6 +1069,7 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
 
         # CODE-02: print()/cat() for messages (skip print/format methods and comments)
         print_method_ranges = find_print_method_ranges(rf)
+        display_helper_ranges = find_display_helper_ranges(rf)
         for lnum, line in scan_file(rf, r'\b(?:print|cat)\s*\('):
             if is_in_comment(line):
                 continue
@@ -1061,6 +1084,12 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                 continue
             # Skip if inside a print/format/summary method body
             if any(start <= lnum <= end for start, end in print_method_ranges):
+                continue
+            # Skip if inside a display/rendering helper (cat_line, show_*, etc.)
+            if any(start <= lnum <= end for start, end in display_helper_ranges):
+                continue
+            # Skip if guarded by verbose or interactive() — CRAN allows these
+            if re.search(r'if\s*\(\s*(?:verbose|interactive\s*\(\s*\))', line):
                 continue
             findings.append(Finding(
                 rule_id="CODE-02", severity="warning",
