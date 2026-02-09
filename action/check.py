@@ -166,6 +166,57 @@ def is_in_comment(line: str) -> bool:
     return stripped.startswith("#")
 
 
+def find_print_method_ranges(filepath: Path) -> list[tuple[int, int]]:
+    """Find line ranges of print/format/summary S3 methods and R6 print methods.
+
+    Returns [(start_line, end_line), ...] for functions where print()/cat() is legitimate.
+    """
+    try:
+        lines = filepath.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return []
+
+    ranges = []
+    # Patterns that indicate a print/format/summary method definition
+    method_patterns = [
+        r'^\s*print\.\w+\s*(<-|=)\s*function',       # print.foo <- function
+        r'^\s*format\.\w+\s*(<-|=)\s*function',       # format.foo <- function
+        r'^\s*summary\.\w+\s*(<-|=)\s*function',      # summary.foo <- function
+        r'^\s*str\.\w+\s*(<-|=)\s*function',           # str.foo <- function
+        r'^\s*show\s*(<-|=)\s*function',               # show <- function (S4)
+        r'^\s*print\s*=\s*function',                   # print = function (R6/RefClass)
+        r'^\s*format\s*=\s*function',                  # format = function (R6/RefClass)
+        r'#\'\s*@export\s*$',                          # marker — check next non-roxygen line
+    ]
+    combined = re.compile('|'.join(method_patterns[:-1]))
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if combined.search(line):
+            # Found a method definition — find its closing brace
+            start = i + 1  # 1-indexed
+            brace_depth = 0
+            found_open = False
+            for j in range(i, len(lines)):
+                for ch in lines[j]:
+                    if ch == '{':
+                        brace_depth += 1
+                        found_open = True
+                    elif ch == '}':
+                        brace_depth -= 1
+                if found_open and brace_depth <= 0:
+                    ranges.append((start, j + 1))
+                    i = j + 1
+                    break
+            else:
+                i += 1
+        else:
+            i += 1
+
+    return ranges
+
+
 # --- Check implementations ---
 
 def check_description_fields(path: Path, desc: dict) -> list[Finding]:
@@ -428,15 +479,22 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                     cran_says="Please write TRUE and FALSE instead of T and F."
                 ))
 
-        # CODE-02: print()/cat() for messages (skip print.*methods and comments)
+        # CODE-02: print()/cat() for messages (skip print/format methods and comments)
+        print_method_ranges = find_print_method_ranges(rf)
         for lnum, line in scan_file(rf, r'\b(?:print|cat)\s*\('):
             if is_in_comment(line):
                 continue
-            # Skip if it's a print.something method definition
-            if re.match(r'^\s*print\.\w+', line):
+            # Skip print/format S3 method definitions
+            if re.match(r'^\s*(?:print|format|summary|str)\.\w+', line):
                 continue
-            # Skip if inside a method that is clearly a print/format S3 method
+            # Skip UseMethod dispatchers
             if "UseMethod" in line:
+                continue
+            # Skip R6/RefClass $print() and $format() method calls
+            if re.search(r'\$\s*(?:print|format)\s*\(', line):
+                continue
+            # Skip if inside a print/format/summary method body
+            if any(start <= lnum <= end for start, end in print_method_ranges):
                 continue
             findings.append(Finding(
                 rule_id="CODE-02", severity="warning",
