@@ -1349,32 +1349,49 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
         for rf in r_files:
             rel = str(rf.relative_to(path))
             text = rf.read_text(encoding="utf-8", errors="replace")
-            # Find @export without @return in the same roxygen block
-            blocks = re.split(r'\n(?!#\')', text)
+            lines_list = text.splitlines()
             in_roxygen = False
             has_export = False
             has_return = False
+            has_rdname = False  # @rdname/@name means docs inherited from another block
+            has_internal = False  # @keywords internal — CRAN doesn't require @return
             block_start = 0
-            for i, line in enumerate(text.splitlines(), 1):
+            for i, line in enumerate(lines_list, 1):
                 if line.strip().startswith("#'"):
                     if not in_roxygen:
                         in_roxygen = True
                         has_export = False
                         has_return = False
+                        has_rdname = False
+                        has_internal = False
                         block_start = i
                     if "@export" in line:
                         has_export = True
-                    if "@return" in line:
+                    if "@return" in line or "@value" in line:
                         has_return = True
+                    if "@rdname" in line or "@name" in line:
+                        has_rdname = True
+                    if "@keywords" in line and "internal" in line:
+                        has_internal = True
                 else:
                     if in_roxygen and has_export and not has_return:
-                        findings.append(Finding(
-                            rule_id="DOC-01", severity="error",
-                            title="Missing @return tag on exported function",
-                            message="Every exported function must document its return value.",
-                            file=rel, line=block_start,
-                            cran_says="Please add \\value to .Rd files regarding exported methods."
-                        ))
+                        # Skip if docs are inherited via @rdname/@name
+                        if has_rdname:
+                            pass
+                        # Skip if marked @keywords internal
+                        elif has_internal:
+                            pass
+                        # Skip S3 method exports (foo.bar <- function) — they inherit from generic
+                        elif re.match(r'^\s*\w+\.\w+', line.strip()):
+                            pass
+                        else:
+                            findings.append(Finding(
+                                rule_id="DOC-01", severity="error",
+                                title="Missing @return tag on exported function",
+                                message="Every exported function must document its return value.",
+                                file=rel, line=block_start,
+                                cran_says="Please add \\value to .Rd files regarding exported methods."
+                            ))
                     in_roxygen = False
     else:
         for rd in rd_files:
@@ -1408,29 +1425,48 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
         for rf in r_files:
             rel = str(rf.relative_to(path))
             text = rf.read_text(encoding="utf-8", errors="replace")
+            lines_list = text.splitlines()
             in_roxygen = False
             has_export = False
             has_examples = False
+            has_rdname = False
+            has_internal = False
             block_start = 0
-            for i, line in enumerate(text.splitlines(), 1):
+            for i, line in enumerate(lines_list, 1):
                 if line.strip().startswith("#'"):
                     if not in_roxygen:
                         in_roxygen = True
                         has_export = False
                         has_examples = False
+                        has_rdname = False
+                        has_internal = False
                         block_start = i
                     if "@export" in line:
                         has_export = True
-                    if "@examples" in line:
+                    if "@examples" in line or "@example" in line:
                         has_examples = True
+                    if "@rdname" in line or "@name" in line:
+                        has_rdname = True
+                    if "@keywords" in line and "internal" in line:
+                        has_internal = True
                 else:
                     if in_roxygen and has_export and not has_examples:
-                        findings.append(Finding(
-                            rule_id="DOC-05", severity="note",
-                            title="Exported function without @examples",
-                            message="Exported functions should include runnable examples.",
-                            file=rel, line=block_start,
-                        ))
+                        # Skip if docs are inherited via @rdname/@name
+                        if has_rdname:
+                            pass
+                        # Skip if marked @keywords internal
+                        elif has_internal:
+                            pass
+                        # Skip S3 method exports — they inherit from generic
+                        elif re.match(r'^\s*\w+\.\w+', line.strip()):
+                            pass
+                        else:
+                            findings.append(Finding(
+                                rule_id="DOC-05", severity="note",
+                                title="Exported function without @examples",
+                                message="Exported functions should include runnable examples.",
+                                file=rel, line=block_start,
+                            ))
                     in_roxygen = False
 
     return findings
