@@ -3,7 +3,7 @@
 > **Warning**
 > This project is experimental. Rules may be incomplete, checks may have false positives, and the API may change without notice. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
 
-**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 44 CRAN rules with verbatim rejection text, so you can fix issues before a human reviewer finds them.
+**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 79 CRAN rules (compiled from 3 years of mailing list rejections) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
 
 Works as a **Claude Code plugin** (interactive) or a **GitHub Action** (CI).
 
@@ -16,6 +16,9 @@ Works as a **Claude Code plugin** (interactive) or a **GitHub Action** (CI).
 - `print()` where you should use `message()`
 - Missing `\value` tag on one exported function out of forty
 - `\dontrun{}` where CRAN wanted `\donttest{}`
+- `bool` redefined in C code (now a keyword in C23/R 4.5+)
+- Lost braces in Rd files (broke 3,000+ packages in R 4.4)
+- Date field that's a month old blocking your resubmission
 
 `R CMD check` doesn't catch these. pedanticran does.
 
@@ -62,16 +65,22 @@ Then in Claude Code, inside your R package directory:
 
 ## What it checks
 
-44 rules across 11 categories:
+79 rules across 12 categories, sourced from 3 years (2023–2025) of CRAN mailing list rejections and policy revisions:
 
-| Category | Examples |
-|----------|---------|
-| DESCRIPTION | Title case, quoting software names, valid Authors@R, license format |
-| Code | T/F literals, print→message, options/par without on.exit, seed in functions |
-| Documentation | Missing @return, \dontrun misuse, unexported examples |
-| Structure | Large files, binary artifacts, missing NEWS.md |
-| Dependencies | Unnecessary imports, packages in Suggests vs Imports |
-| Submission | Version numbering, cran-comments.md, resubmission etiquette |
+| Category | Rules | Examples |
+|----------|------:|---------|
+| DESCRIPTION | 15 | Title case, quoting software names, valid Authors@R, license format, stale Date field, smart quotes |
+| Code Behavior | 18 | T/F literals, print→message, options/par without on.exit, seed in functions, browser() calls, sprintf deprecation |
+| Compiled Code | 9 | C23 keywords, R_NO_REMAP, non-API entry points, strict prototypes, Fortran KIND, Rust vendoring |
+| Documentation | 9 | Missing @return, \dontrun misuse, lost braces (R 4.3+), HTML5 Rd validation |
+| Licensing | 3 | License validity, license changes, dual licensing prohibition |
+| Size & Performance | 2 | Tarball size (10MB), check time (10 min) |
+| Cross-Platform | 2 | Multi-platform support, no binary executables |
+| Dependencies | 3 | Strong deps on CRAN, conditional Suggests, dependency health monitoring |
+| Internet | 3 | Graceful failure, HTTPS, rate limit policy (rev6277) |
+| Submission | 7 | R CMD check, multi-platform testing, reverse deps, vacation periods |
+| Package Naming | 2 | Case-insensitive uniqueness, permanence |
+| Miscellaneous | 6 | NEWS format, URL validity, spelling, .Rbuildignore, Makefile portability |
 
 Every rule includes the verbatim CRAN rejection text, so you know exactly what reviewers will say.
 
@@ -87,15 +96,15 @@ Every rule includes the verbatim CRAN rejection text, so you know exactly what r
 
 **Outputs:** `issues`, `errors`, `warnings`, `notes` — use in downstream steps.
 
-The checker is pure Python (stdlib only). No R, no compiled dependencies.
+The checker is pure Python (stdlib only). No R, no compiled dependencies. Runs 30 static analysis checks covering DESCRIPTION, R code, C/C++/Fortran, Makevars, configure scripts, and documentation.
 
 ## How `/cran-fix` works
 
 Fixes are applied in tiers:
 
-1. **Mechanical** (applied automatically): `T`→`TRUE`, `http`→`https`, `\dontrun`→`\donttest`
-2. **Safe with review** (shows diff first): Title case, quoting names, adding `@return` tags
-3. **Needs input** (asks you): License choice, rewriting Description, adding dependencies
+1. **Mechanical** (applied automatically): `T`→`TRUE`, `http`→`https`, `\dontrun`→`\donttest`, smart quotes, stale Date field, `sprintf`→`snprintf`, `#!/bin/bash`→`#!/bin/sh`
+2. **Safe with review** (shows diff first): Title case, quoting names, adding `@return` tags, `Rf_` prefix for C++ R API, lost braces in Rd, Fortran KIND portability
+3. **Needs input** (asks you): License choice, rewriting Description, C23 keyword conflicts, Rust crate vendoring, rate limiting strategy
 
 Nothing destructive happens without your approval.
 

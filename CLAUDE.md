@@ -4,8 +4,13 @@ A Claude Code plugin that helps R package developers survive CRAN submission.
 
 ## Project Structure
 
-- `knowledge/cran-rules.md` — Structured knowledge base of all CRAN requirements, with verbatim rejection text
+- `knowledge/cran-rules.md` — 79 rules across 12 categories, with verbatim rejection text
 - `skills/cran-audit.md` — The `/cran-audit` skill: reads an R package and produces a pre-submission report
+- `skills/cran-fix.md` — The `/cran-fix` skill: tiered auto-remediation (mechanical → reviewed → user input)
+- `skills/cran-respond.md` — The `/cran-respond` skill: parses CRAN rejection emails and drafts resubmission
+- `action/check.py` — Python static analyzer (30 checks, no R dependency)
+- `action/action.yml` — GitHub Action definition
+- `research/` — Mailing list analysis reports (2023–2025) and checker validation
 - `install.sh` — Installs skills into `~/.claude/skills/`
 
 ## Development
@@ -22,7 +27,7 @@ The knowledge base (`knowledge/cran-rules.md`) is the core IP. Keep it:
 The `action/` directory contains a standalone GitHub Action. Users add it to their R package CI:
 
 ```yaml
-- uses: pedanticran/pedanticran@main
+- uses: ian-flores/pedanticran@main
   with:
     path: '.'
     severity: 'warning'   # report warnings and errors
@@ -32,9 +37,14 @@ The `action/` directory contains a standalone GitHub Action. Users add it to the
 The Python checker (`action/check.py`) encodes knowledge base rules as static analysis.
 It runs without R and produces GitHub Actions annotations on the exact files/lines.
 
-## Phases
+## Current State
+
+All four phases are implemented:
 
 1. Knowledge base + `/cran-audit` (read-only)
 2. `/cran-fix` (auto-remediation)
 3. `/cran-respond` (rejection email parser)
 4. GitHub Action (CI integration)
+
+Knowledge base sourced from 3 years of CRAN mailing list rejections (2023–2025).
+Validated against dplyr (large) and glosario (small) — see `research/checker-validation.md`.
