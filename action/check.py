@@ -1367,7 +1367,7 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
                         block_start = i
                     if "@export" in line:
                         has_export = True
-                    if "@return" in line or "@value" in line:
+                    if "@return" in line or "@value" in line or "@inherit" in line:
                         has_return = True
                     if "@rdname" in line or "@name" in line:
                         has_rdname = True
@@ -1375,14 +1375,24 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
                         has_internal = True
                 else:
                     if in_roxygen and has_export and not has_return:
+                        stripped = line.strip()
                         # Skip if docs are inherited via @rdname/@name
                         if has_rdname:
                             pass
                         # Skip if marked @keywords internal
                         elif has_internal:
                             pass
+                        # Skip reexports (pkg::fun or pkg::`fun`)
+                        elif re.match(r'^\s*\w+(::|:::)', stripped):
+                            pass
                         # Skip S3 method exports (foo.bar <- function) — they inherit from generic
-                        elif re.match(r'^\s*\w+\.\w+', line.strip()):
+                        elif re.match(r'^\s*\w+\.\w+', stripped):
+                            pass
+                        # Skip backtick-quoted method exports (`[.class` <- function)
+                        elif stripped.startswith('`'):
+                            pass
+                        # Skip NULL (bare doc blocks for @name/@aliases)
+                        elif stripped == 'NULL':
                             pass
                         else:
                             findings.append(Finding(
@@ -1443,7 +1453,7 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
                         block_start = i
                     if "@export" in line:
                         has_export = True
-                    if "@examples" in line or "@example" in line:
+                    if "@examples" in line or "@example" in line or "@inherit" in line:
                         has_examples = True
                     if "@rdname" in line or "@name" in line:
                         has_rdname = True
@@ -1451,14 +1461,24 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
                         has_internal = True
                 else:
                     if in_roxygen and has_export and not has_examples:
+                        stripped = line.strip()
                         # Skip if docs are inherited via @rdname/@name
                         if has_rdname:
                             pass
                         # Skip if marked @keywords internal
                         elif has_internal:
                             pass
+                        # Skip reexports (pkg::fun or pkg::`fun`)
+                        elif re.match(r'^\s*\w+(::|:::)', stripped):
+                            pass
                         # Skip S3 method exports — they inherit from generic
-                        elif re.match(r'^\s*\w+\.\w+', line.strip()):
+                        elif re.match(r'^\s*\w+\.\w+', stripped):
+                            pass
+                        # Skip backtick-quoted method exports
+                        elif stripped.startswith('`'):
+                            pass
+                        # Skip NULL (bare doc blocks for @name/@aliases)
+                        elif stripped == 'NULL':
                             pass
                         else:
                             findings.append(Finding(
