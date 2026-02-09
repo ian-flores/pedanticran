@@ -166,6 +166,41 @@ def is_in_comment(line: str) -> bool:
     return stripped.startswith("#")
 
 
+def _function_nesting_depth(filepath: Path, target_line: int) -> int:
+    """Count how many function() scopes enclose a given line number (1-indexed).
+
+    Returns 0 if at top level, 1 if inside one function, 2+ if inside a closure.
+    Used to distinguish <<- in closures (depth >= 2, modifies parent scope)
+    from <<- at function top level (depth <= 1, may modify global env).
+    """
+    try:
+        lines = filepath.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return 0
+
+    # Track function openings via a stack of brace depths
+    func_starts: list[int] = []  # brace depths where function bodies started
+    brace_depth = 0
+
+    for i, line in enumerate(lines, 1):
+        if i >= target_line:
+            break
+        # Detect scope-creating constructs: function(), quo(), local(), etc.
+        # In R, <<- inside any of these targets the enclosing scope, not global
+        if re.search(r'\b(?:function\s*\(|quo\s*\(\s*\{|local\s*\(\s*\{)', line):
+            func_starts.append(brace_depth)
+        for ch in line:
+            if ch == '{':
+                brace_depth += 1
+            elif ch == '}':
+                brace_depth -= 1
+                # If we've closed back to where a function started, pop it
+                while func_starts and brace_depth <= func_starts[-1]:
+                    func_starts.pop()
+
+    return len(func_starts)
+
+
 def _find_function_body_ranges(filepath: Path, patterns: list[str]) -> list[tuple[int, int]]:
     """Find line ranges of function bodies matching given definition patterns.
 
@@ -1159,8 +1194,12 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                 ))
 
         # CODE-09: Global environment modification
+        # <<- inside closures (depth >= 2) is standard R — modifies parent scope, not global
         for lnum, line in scan_file(rf, r'<<-'):
             if not is_in_comment(line):
+                depth = _function_nesting_depth(rf, lnum)
+                if depth >= 2:
+                    continue  # Inside a closure — modifies enclosing function scope, not global
                 findings.append(Finding(
                     rule_id="CODE-09", severity="warning",
                     title="<<- modifies parent/global environment",
