@@ -26,9 +26,9 @@ Validation of `action/check.py` against two real R packages: one large CRAN-publ
 | Severity | dplyr | glosario |
 |----------|------:|--------:|
 | **Errors** (blocking) | 15 | 3 |
-| **Warnings** (may block) | 22 | 3 |
+| **Warnings** (may block) | 16 | 3 |
 | **Notes** (recommended) | 14 | 6 |
-| **Total** | **51** | **12** |
+| **Total** | **45** | **12** |
 
 ---
 
@@ -43,7 +43,6 @@ This is dplyr's **development branch** (v1.2.0.9000), not the release tarball th
 | Rule | Count | Severity | What it found |
 |------|------:|----------|---------------|
 | DOC-01 | 11 | error | Missing `@return` on exported functions: `desc()`, `near()`, `order_by()`, `join_by()`, `compute()`/`collect()`, `auto_copy()`, `vars()`, `all_vars()`/`any_vars()`, `group_cols()`, `tbl()`. All standalone documented exports genuinely missing `@return`. |
-| CODE-09 | 6 | warning | `<<-` usage in closures and condition handlers (`across.R`, `deprec-do.R`, `grouped-df.R`, `sets.R`, `slice.R`). Legitimate — modifies parent scope inside nested functions, not global env. |
 | ENC-05 | 6 | warning | Missing `%\VignetteEncoding{UTF-8}` in all 6 vignettes. True positive — would be flagged by R CMD check. |
 | VIG-02 | 6 | note | Same vignette encoding issue reported from the vignette-check perspective. |
 | DOC-05 | 5 | note | Missing `@examples` on `vars()`, `all_vars()`, `auto_copy()`, `tbl()`, and an orphaned `@export` in `dbplyr.R`. |
@@ -61,9 +60,8 @@ This is dplyr's **development branch** (v1.2.0.9000), not the release tarball th
 ### Assessment
 
 - **True positives**: DOC-01 (11), ENC-05 (6), VIG-02 (6), DOC-05 (5), DOC-02 (4), NET-02 (3), VIG-04 (2), NS-02 (2), NS-01, CODE-04, MISC-06, DESC-12 — all legitimate flags
-- **Context-dependent**: CODE-09 (`<<-` in closures — standard R pattern but technically parent-env modification)
 - **Borderline**: DESC-05 (sentence detection too strict for complex prose)
-- **False positive rate**: ~2% (1 borderline DESC-05 out of 51)
+- **False positive rate**: ~2% (1 borderline DESC-05 out of 45)
 
 ---
 
@@ -152,6 +150,20 @@ The `print()`/`cat()` check understands that these functions are legitimate insi
 | S3/R6 method detection | 2 | 89% |
 | + Display helpers + verbose guards | 0 | 100% |
 
+### CODE-09: Closure-Aware `<<-` Detection
+
+The `<<-` check now understands function nesting depth to distinguish closures from global environment modification.
+
+| Nesting depth | Meaning | Action |
+|---------------|---------|--------|
+| 0 | Top-level code | Flag (modifies global env) |
+| 1 | Inside one function | Flag (may modify global env) |
+| 2+ | Inside a closure | Skip (modifies enclosing function scope) |
+
+Scope-creating constructs recognized: `function()`, `quo({})`, `local({})`.
+
+**Impact on dplyr:** 6 findings → 0 (all were `<<-` inside closures, condition handlers, or tidy eval quosures).
+
 ### EMAIL-02: Positional Email Parsing
 
 The maintainer email check now handles both named and positional arguments in R's `person()` function:
@@ -196,6 +208,7 @@ These rules exist in the checker but weren't triggered by either package (expect
 | DESC-15 (Smart quotes) | No Unicode quotes |
 | CODE-01 (T/F) | No bare T/F as logical values |
 | CODE-02 (cat/print) | Eliminated on dplyr via display-helper detection |
+| CODE-09 (<<-) | Eliminated on dplyr via closure nesting detection |
 | CODE-03 (set.seed) | No seeds in function bodies |
 | CODE-05 (warn=-1) | Not used |
 | CODE-08 (installed.packages) | Not used |
@@ -218,9 +231,10 @@ These rules exist in the checker but weren't triggered by either package (expect
 ## Conclusions
 
 1. **The checker works correctly on real-world packages** — from a 106-file tidyverse flagship to a 14-file Carpentries tool.
-2. **False positive rate is ~2%** — one borderline DESC-05 finding on dplyr out of 51 total. Zero false positives on glosario.
+2. **False positive rate is ~2%** — one borderline DESC-05 finding on dplyr out of 45 total. Zero false positives on glosario.
 3. **DOC-01/DOC-05 filtering is effective** — 97-99% reduction via roxygen inheritance awareness, with zero true positives lost.
 4. **CODE-02 filtering is comprehensive** — 100% false positive elimination on dplyr via S3 method detection, display helpers, and verbose/interactive guards.
-5. **New check categories add value** — ENC-05, VIG-02, VIG-04, NS-01, NS-02 all fired with true positives on dplyr.
-6. **The checker catches things R CMD check misses** — DESC-02, DESC-05, DESC-09, CODE-02, DOC-01 missing `@return` are all common CRAN rejection reasons that `R CMD check --as-cran` doesn't always flag clearly.
-7. **Scale is appropriate** — large packages get detailed reports, small packages get actionable short lists.
+5. **CODE-09 closure detection works** — all 6 `<<-` findings on dplyr were inside closures/condition handlers and correctly suppressed.
+6. **New check categories add value** — ENC-05, VIG-02, VIG-04, NS-01, NS-02 all fired with true positives on dplyr.
+7. **The checker catches things R CMD check misses** — DESC-02, DESC-05, DESC-09, CODE-02, DOC-01 missing `@return` are all common CRAN rejection reasons that `R CMD check --as-cran` doesn't always flag clearly.
+8. **Scale is appropriate** — large packages get detailed reports, small packages get actionable short lists.
