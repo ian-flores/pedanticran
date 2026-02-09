@@ -3,7 +3,7 @@
 > **Warning**
 > This project is experimental. Rules may be incomplete, checks may have false positives, and the API may change without notice. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
 
-**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 79 CRAN rules (compiled from 3 years of mailing list rejections) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
+**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 130 CRAN rules (compiled from 3 years of mailing list rejections) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
 
 Works as a **Claude Code plugin** (interactive) or a **GitHub Action** (CI).
 
@@ -65,7 +65,7 @@ Then in Claude Code, inside your R package directory:
 
 ## What it checks
 
-79 rules across 12 categories, sourced from 3 years (2023–2025) of CRAN mailing list rejections and policy revisions:
+130 rules across 19 categories, sourced from 3 years (2023–2025) of CRAN mailing list rejections and policy revisions:
 
 | Category | Rules | Examples |
 |----------|------:|---------|
@@ -81,6 +81,13 @@ Then in Claude Code, inside your R package directory:
 | Submission | 7 | R CMD check, multi-platform testing, reverse deps, vacation periods |
 | Package Naming | 2 | Case-insensitive uniqueness, permanence |
 | Miscellaneous | 6 | NEWS format, URL validity, spelling, .Rbuildignore, Makefile portability |
+| Encoding | 8 | Missing Encoding field, non-ASCII in R source, BOM detection, \x escape sequences |
+| Vignettes | 8 | VignetteBuilder declaration, metadata, stale inst/doc, build dependencies, html_document size |
+| NAMESPACE | 7 | Import conflicts, importFrom preference, S3 method registration, broad exportPattern, Depends misuse |
+| Data | 9 | Undocumented datasets, LazyData configuration, compression, size limits, invalid formats |
+| System Requirements | 7 | Undeclared system libraries, external programs, C++ standard consistency, Java source requirements |
+| Maintainer Email | 6 | Mailing list detection, disposable domains, placeholder addresses, noreply patterns |
+| inst/ Directory | 6 | Hidden files, deprecated CITATION format, reserved directories, third-party copyright |
 
 Every rule includes the verbatim CRAN rejection text, so you know exactly what reviewers will say.
 
@@ -96,7 +103,7 @@ Every rule includes the verbatim CRAN rejection text, so you know exactly what r
 
 **Outputs:** `issues`, `errors`, `warnings`, `notes` — use in downstream steps.
 
-The checker is pure Python (stdlib only). No R, no compiled dependencies. Runs 30 static analysis checks covering DESCRIPTION, R code, C/C++/Fortran, Makevars, configure scripts, and documentation.
+The checker is pure Python (stdlib only). No R, no compiled dependencies. Runs 65+ static analysis checks covering DESCRIPTION, R code, C/C++/Fortran, Makevars, configure scripts, documentation, encoding, vignettes, NAMESPACE, data, system requirements, maintainer email, and inst/ directory.
 
 ## How `/cran-fix` works
 
@@ -117,6 +124,19 @@ Paste your rejection email. pedanticran:
 3. Scans for related issues CRAN didn't mention yet (if they flagged one missing `@return`, it checks all your exports)
 4. Provides exact fixes with file paths
 5. Drafts your resubmission comment
+
+## How it complements R CMD check and devtools
+
+pedanticran is not a replacement for `R CMD check` — it catches what `R CMD check` misses. Of 130 rules, many are unique to pedanticran and checked by no other automated tool in the R ecosystem.
+
+`devtools::check()` is a convenience wrapper around `R CMD check` — it adds zero additional policy checks. `goodpractice` covers about 10–15% of pedanticran's unique rules. The full gap analysis is in [`research/devtools-comparison.md`](research/devtools-comparison.md).
+
+| Tool | Role |
+|------|------|
+| `R CMD check` | "Does it build and pass basic checks?" |
+| `devtools::release()` | "Did you remember to do these things?" (manual checklist) |
+| `goodpractice` | "Here are some style suggestions" (partial) |
+| **pedanticran** | **"Will a CRAN reviewer accept this?"** (the actual gate) |
 
 ## Contributing
 

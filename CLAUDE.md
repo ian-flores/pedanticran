@@ -4,11 +4,11 @@ A Claude Code plugin that helps R package developers survive CRAN submission.
 
 ## Project Structure
 
-- `knowledge/cran-rules.md` — 79 rules across 12 categories, with verbatim rejection text
+- `knowledge/cran-rules.md` — 130 rules across 19 categories, with verbatim rejection text
 - `skills/cran-audit.md` — The `/cran-audit` skill: reads an R package and produces a pre-submission report
 - `skills/cran-fix.md` — The `/cran-fix` skill: tiered auto-remediation (mechanical → reviewed → user input)
 - `skills/cran-respond.md` — The `/cran-respond` skill: parses CRAN rejection emails and drafts resubmission
-- `action/check.py` — Python static analyzer (30 checks, no R dependency)
+- `action/check.py` — Python static analyzer (65+ checks, no R dependency)
 - `action/action.yml` — GitHub Action definition
 - `research/` — Mailing list analysis reports (2023–2025) and checker validation
 - `install.sh` — Installs skills into `~/.claude/skills/`
