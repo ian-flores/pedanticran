@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import datetime
 import os
 import re
 import sys
@@ -335,6 +336,53 @@ def check_description_fields(path: Path, desc: dict) -> list[Finding]:
             file=desc_file,
         ))
 
+    # DESC-13: Stale Date field
+    date_field = desc.get("Date", "")
+    if date_field:
+        try:
+            d = datetime.date.fromisoformat(date_field.strip())
+            age = (datetime.date.today() - d).days
+            if age > 30:
+                findings.append(Finding(
+                    rule_id="DESC-13", severity="warning",
+                    title="DESCRIPTION Date field is stale",
+                    message=f"Date field is '{date_field}' ({age} days old). Update or remove it before submission.",
+                    file=desc_file,
+                    cran_says="The Date field is over a month old."
+                ))
+        except ValueError:
+            pass
+
+    # DESC-14: Version component size
+    version = desc.get("Version", "")
+    if version:
+        for component in version.split("."):
+            try:
+                if int(component) > 9000:
+                    findings.append(Finding(
+                        rule_id="DESC-14", severity="note",
+                        title="Large version component",
+                        message=f"Version '{version}' has a component > 9000, which triggers a NOTE.",
+                        file=desc_file,
+                    ))
+                    break
+            except ValueError:
+                pass
+
+    # DESC-15: Smart/curly quotes in DESCRIPTION
+    desc_file_path = path / "DESCRIPTION"
+    if desc_file_path.exists():
+        desc_text = desc_file_path.read_text(encoding="utf-8", errors="replace")
+        smart_quotes = re.findall(r'[\u2018\u2019\u201C\u201D]', desc_text)
+        if smart_quotes:
+            findings.append(Finding(
+                rule_id="DESC-15", severity="error",
+                title="Smart/curly quotes in DESCRIPTION",
+                message=f"Found {len(smart_quotes)} smart quote character(s). Use straight ASCII quotes only.",
+                file=desc_file,
+                cran_says="Non-ASCII characters in DESCRIPTION."
+            ))
+
     # License validity (basic check)
     valid_licenses = {
         "GPL-2", "GPL-3", "GPL (>= 2)", "GPL (>= 3)",
@@ -358,8 +406,10 @@ def check_description_fields(path: Path, desc: dict) -> list[Finding]:
     return findings
 
 
-def check_code(path: Path) -> list[Finding]:
+def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
     """Check R source files for CRAN policy violations."""
+    if desc is None:
+        desc = {}
     findings = []
     r_files = find_r_files(path)
 
@@ -509,6 +559,17 @@ def check_code(path: Path) -> list[Finding]:
                     cran_says="Please do not install packages in your functions."
                 ))
 
+        # CODE-15: browser() calls
+        for lnum, line in scan_file(rf, r'\bbrowser\s*\('):
+            if not is_in_comment(line):
+                findings.append(Finding(
+                    rule_id="CODE-15", severity="error",
+                    title="browser() statement in package code",
+                    message="Remove browser() calls before submission.",
+                    file=rel, line=lnum,
+                    cran_says="R CMD check flags browser() under --as-cran."
+                ))
+
     # C/C++ checks
     for sf in find_src_files(path):
         rel = str(sf.relative_to(path))
@@ -522,6 +583,43 @@ def check_code(path: Path) -> list[Finding]:
                         message="Use Rf_error() instead.",
                         file=rel, line=lnum,
                     ))
+
+            # CODE-16: sprintf/vsprintf in C/C++
+            for lnum, line in scan_file(sf, r'\b(?:sprintf|vsprintf)\s*\('):
+                if not is_in_comment(line):
+                    findings.append(Finding(
+                        rule_id="CODE-16", severity="warning",
+                        title="sprintf/vsprintf in compiled code",
+                        message="Use snprintf/vsnprintf instead. sprintf is deprecated on macOS 13+.",
+                        file=rel, line=lnum,
+                    ))
+
+            # COMP-07: Strict C function prototypes
+            if ext in (".c", ".h"):
+                for lnum, line in scan_file(sf, r'\b\w+\s*\(\s*\)\s*[{;]'):
+                    if not is_in_comment(line):
+                        # Skip if it's a function call (no type before it)
+                        if re.match(r'^\s*(static\s+|extern\s+|inline\s+)?(void|int|char|double|float|long|unsigned|SEXP|Rboolean)\s+\w+\s*\(\s*\)', line):
+                            findings.append(Finding(
+                                rule_id="COMP-07", severity="warning",
+                                title="Empty parameter list — use (void)",
+                                message=f"C function with empty parens should be (void): `{line.strip()[:80]}`",
+                                file=rel, line=lnum,
+                                cran_says="Function declaration isn't a prototype."
+                            ))
+
+            # COMP-02: bare R API names in C++ (R_NO_REMAP)
+            if ext in (".cpp", ".cc"):
+                bare_api_pattern = r'(?<!\w)(?<![Rr]f_)(?:error|warning|length|mkChar|alloc(?:Vector|Matrix)|protect|unprotect)\s*\('
+                for lnum, line in scan_file(sf, bare_api_pattern):
+                    if not is_in_comment(line) and 'Rf_' not in line:
+                        findings.append(Finding(
+                            rule_id="COMP-02", severity="warning",
+                            title="Bare R API name in C++ (needs Rf_ prefix)",
+                            message=f"R 4.5+ compiles C++ with -DR_NO_REMAP: `{line.strip()[:80]}`",
+                            file=rel, line=lnum,
+                        ))
+
         if ext in (".f", ".f90", ".f95"):
             for lnum, line in scan_file(sf, r'\bSTOP\b'):
                 findings.append(Finding(
@@ -530,6 +628,58 @@ def check_code(path: Path) -> list[Finding]:
                     message="Do not use STOP in Fortran code for R packages.",
                     file=rel, line=lnum,
                 ))
+
+            # COMP-08: Fortran KIND portability
+            for lnum, line in scan_file(sf, r'(?:INTEGER|REAL)\s*(?:\*\d+|\(\s*KIND\s*=\s*\d+\s*\))', re.IGNORECASE):
+                findings.append(Finding(
+                    rule_id="COMP-08", severity="warning",
+                    title="Non-portable Fortran KIND specification",
+                    message=f"Use SELECTED_INT_KIND()/SELECTED_REAL_KIND() instead: `{line.strip()[:80]}`",
+                    file=rel, line=lnum,
+                    cran_says="Non-portable Fortran KIND specifications."
+                ))
+
+    # COMP-06: Deprecated C++ standard in Makevars
+    for makevars in [path / "src" / "Makevars", path / "src" / "Makevars.win"]:
+        if makevars.exists():
+            rel = str(makevars.relative_to(path))
+            for lnum, line in scan_file(makevars, r'CXX_STD\s*=\s*CXX1[14]'):
+                findings.append(Finding(
+                    rule_id="COMP-06", severity="warning",
+                    title="Deprecated C++ standard (CXX11/CXX14)",
+                    message=f"Remove CXX_STD line — R defaults to C++17+: `{line.strip()[:80]}`",
+                    file=rel, line=lnum,
+                    cran_says="C++11/C++14 specifications are deprecated."
+                ))
+
+    # COMP-05: Configure script portability
+    for script_name in ["configure", "cleanup"]:
+        script = path / script_name
+        if script.exists():
+            rel = str(script.relative_to(path))
+            for lnum, line in scan_file(script, r'^#!/bin/bash'):
+                findings.append(Finding(
+                    rule_id="COMP-05", severity="error",
+                    title=f"{script_name} uses #!/bin/bash",
+                    message="Use #!/bin/sh for portability.",
+                    file=rel, line=lnum,
+                    cran_says="NOTE 'configure': /bin/bash is not portable"
+                ))
+
+    # MISC-05: Non-portable Makefile features
+    for makevars in [path / "src" / "Makevars", path / "src" / "Makevars.win"]:
+        if makevars.exists():
+            rel = str(makevars.relative_to(path))
+            gnu_features = r'\b(?:ifeq|ifneq|ifdef|ifndef)\b|\$\{(?:shell|wildcard)\}'
+            sys_reqs = desc.get("SystemRequirements", "")
+            if "GNU make" not in sys_reqs:
+                for lnum, line in scan_file(makevars, gnu_features):
+                    findings.append(Finding(
+                        rule_id="MISC-05", severity="warning",
+                        title="Non-portable Makefile feature",
+                        message=f"GNU make extension without SystemRequirements: GNU make: `{line.strip()[:80]}`",
+                        file=rel, line=lnum,
+                    ))
 
     return findings
 
@@ -715,6 +865,21 @@ def check_structure(path: Path, desc: dict) -> list[Finding]:
                     message=f"Add '^{pattern}$' to .Rbuildignore",
                 ))
 
+    # MISC-06: NEWS file format
+    news_file = path / "NEWS.md"
+    if news_file.exists():
+        text = news_file.read_text(encoding="utf-8", errors="replace")
+        headings = re.findall(r'^#\s+(.+)$', text, re.MULTILINE)
+        for heading in headings:
+            # Check for version-like pattern
+            if not re.search(r'\d+\.\d+', heading):
+                findings.append(Finding(
+                    rule_id="MISC-06", severity="note",
+                    title="NEWS.md heading may not be parseable",
+                    message=f"Heading '{heading[:60]}' may not be recognized as a version heading.",
+                    file="NEWS.md",
+                ))
+
     return findings
 
 
@@ -785,7 +950,7 @@ def main():
     # Run all checks
     all_findings: list[Finding] = []
     all_findings.extend(check_description_fields(pkg_path, desc))
-    all_findings.extend(check_code(pkg_path))
+    all_findings.extend(check_code(pkg_path, desc))
     all_findings.extend(check_documentation(pkg_path, desc))
     all_findings.extend(check_structure(pkg_path, desc))
 

@@ -105,6 +105,17 @@ Common CRAN feedback → Rule ID mapping:
 | "CXX_STD" or "CXX11" or "CXX14" deprecated | COMP-06 |
 | "requires archived package" or dependency cascade | DEP-03 |
 | "GNU make" or Makefile portability | MISC-05 |
+| "Date field is over a month old" | DESC-13 |
+| "large version component" or version > 9000 | DESC-14 |
+| "non-ASCII" in DESCRIPTION with quote issues | DESC-15 |
+| "Lost braces" in Rd parsing | DOC-08 |
+| "HTML" validation or deprecated elements in help | DOC-09 |
+| "licensed as a whole" or per-file license | LIC-03 |
+| "strict-prototypes" or "isn't a prototype" | COMP-07 |
+| "KIND" portability or "non-portable" Fortran | COMP-08 |
+| "cargo" or "vendor" or Rust dependencies | COMP-09 |
+| "rate limit" or HTTP 429/403 | NET-03 |
+| "section titles" in NEWS or NEWS format | MISC-06 |
 
 ### Step 4: Produce Fixes
 
@@ -142,6 +153,10 @@ CRAN reviewers sometimes address only the most obvious issues and reject again f
 - If they flagged "Installation took CPU time", check for UseLTO in DESCRIPTION (CODE-17)
 - If they flagged dependency issues, check all Imports/Depends for archival risk (DEP-03) and suggest CRANhaven as emergency fallback
 - If they flagged test failures, verify the fix is to FIX the tests, not remove them (CODE-18 — this specific approach is always rejected)
+- If they flagged "non-ASCII characters", also check for smart quotes in DESCRIPTION (DESC-15) and lost braces in Rd (DOC-08)
+- If they flagged "Lost braces", recommend upgrading roxygen2 to >= 7.3.0 and also check for HTML5 validation issues (DOC-09)
+- If they flagged Fortran issues, also check for strict-prototypes in C code (COMP-07) — Fortran and C compilation issues tend to cluster
+- If they flagged the Date field, also check that the version number is reasonable (DESC-14) — both are resubmission blockers
 
 Tell the user: "CRAN mentioned X, but I also found Y and Z that could trigger the same reviewer on your next submission."
 
@@ -196,6 +211,12 @@ R 4.5.0 (April 2025) introduced several new checks. If the rejection references 
 5. **Configure script bashisms** — `/bin/bash` and bash-specific syntax in configure scripts. Fix: use `/bin/sh` and POSIX syntax.
 
 6. **C++11/C++14 deprecated** — `CXX_STD = CXX11` in Makevars generates notes. Fix: remove the line.
+
+7. **Lost braces (R 4.3+/4.4)** — Unescaped literal braces in Rd files. Affected 3000+ packages. Fix: escape with `\{` `\}` or upgrade roxygen2 >= 7.3.0.
+
+8. **Strict C prototypes (R 4.4+)** — Empty parameter lists in C function declarations. Fix: add `void`.
+
+9. **Fortran KIND portability** — Hardcoded KIND values flagged. Fix: use `SELECTED_INT_KIND()`/`SELECTED_REAL_KIND()`.
 
 These often appear together in packages with compiled code. If CRAN flags one, check for all of them.
 

@@ -70,6 +70,12 @@ Read the `DESCRIPTION` file and check:
 
 12. **DESC-12: Version** — Sensible version number?
 
+13. **DESC-13: Stale Date** — If Date field exists, is it more than a month old?
+
+14. **DESC-14: Version size** — Any version component > 9000?
+
+15. **DESC-15: Straight quotes** — Any smart/curly/directed quotes (Unicode \u2018-\u201D) in DESCRIPTION?
+
 #### 3b. Code Checks
 
 Search all files in `R/` directory:
@@ -132,6 +138,12 @@ If `src/` directory exists with C/C++/Fortran files, run these additional checks
 
 6. **COMP-06: Deprecated C++ std** — Grep src/Makevars and src/Makevars.win for `CXX_STD\s*=\s*CXX1[14]`
 
+7. **COMP-07: Strict prototypes** — Grep src/*.c, src/*.h for function declarations with empty parens: `\w+\s*\(\s*\)` that should be `\w+(void)`
+
+8. **COMP-08: Fortran KIND** — If src/*.f or src/*.f90 exist, grep for `KIND\s*=\s*\d+`, `INTEGER\*\d+`, `REAL\*\d+`
+
+9. **COMP-09: Rust packaging** — If Cargo.toml exists, check for vendor/ directory, configure script printing rustc version, AUTHORS file
+
 #### 3c. Documentation Checks
 
 1. **DOC-01: @return tags** — For every file in `R/` with `@export`, verify it also has `@return`
@@ -144,6 +156,10 @@ If `src/` directory exists with C/C++/Fortran files, run these additional checks
 
 5. **DOC-05: Missing examples** — Find `@export` without `@examples`
 
+6. **DOC-08: Lost braces** — If using roxygen2 < 7.3.0, check for `\itemize{}` with description-style items (`\item{term}{def}` should be `\describe{}`). Grep man/*.Rd for "Lost braces" patterns.
+
+7. **DOC-09: HTML5 validation** — Grep man/*.Rd for deprecated HTML elements (`<font>`, `<center>`, `<strike>`).
+
 #### 3d. Structure Checks
 
 1. **MISC-01: NEWS.md** — Does it exist?
@@ -154,6 +170,9 @@ If `src/` directory exists with C/C++/Fortran files, run these additional checks
 6. **PLAT-02: Binaries** — Any binary files in the source tree?
 7. **NET-02: HTTP URLs** — Any `http://` URLs (non-localhost)?
 8. **MISC-05: Makefile portability** — If src/Makevars exists, check for GNU make extensions (ifeq, ifneq, ${shell}, ${wildcard}) without `SystemRequirements: GNU make` in DESCRIPTION
+9. **NET-03: Rate limiting** — If package makes HTTP requests, check for rate-limiting awareness (retry logic, backoff, caching)
+10. **LIC-03: Dual licensing** — Check for per-file license headers differing from DESCRIPTION License field
+11. **MISC-06: NEWS format** — If NEWS.md exists, verify version headings match standard format
 
 #### 3e. Dependency Checks
 
@@ -193,6 +212,7 @@ Each issue:
 - [ ] If first submission: package name verified as available
 - [ ] If package has compiled code: tested against R-devel and R 4.5+ (C23/R_NO_REMAP changes)
 - [ ] If resubmitting during Dec/Jan: aware of CRAN vacation period (SUB-07)
+- [ ] If resubmitting: Date field in DESCRIPTION is current (DESC-13)
 
 ### Summary
 X blocking issues, Y warnings, Z recommendations

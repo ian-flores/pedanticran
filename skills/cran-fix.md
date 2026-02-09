@@ -115,6 +115,29 @@ Pattern: #!/bin/bash
 Replace: #!/bin/sh
 ```
 
+**FIX-SMART-QUOTES: Replace smart quotes in DESCRIPTION** (DESC-15)
+```
+Search: DESCRIPTION
+Pattern: Unicode curly/smart quotes (\u2018, \u2019, \u201C, \u201D)
+Replace: Straight ASCII quotes (' and ")
+```
+
+**FIX-DATE: Update or remove stale Date field** (DESC-13)
+```
+Search: DESCRIPTION
+Pattern: Date: YYYY-MM-DD (if > 30 days old)
+Replace: Remove the Date line entirely (CRAN derives it from the tarball)
+```
+- Removing is safer than updating since R CMD build sets it automatically
+
+**FIX-STRICT-PROTO: Add void to empty C function parameters** (COMP-07)
+```
+Search: src/*.c, src/*.h
+Pattern: function declarations with empty parens: int foo()
+Replace: int foo(void)
+```
+- Only fix declarations/definitions, not function calls
+
 #### Tier 2: Safe With Minor Judgment (Apply, But Show Changes)
 
 These have a clear correct direction but may need tweaking.
@@ -192,6 +215,23 @@ Pattern: UseLTO: yes (or TRUE)
 Remove: the entire UseLTO line
 ```
 
+**FIX-LOST-BRACES: Fix lost braces in Rd documentation** (DOC-08)
+```
+Search: man/*.Rd, R/*.R
+Pattern: \itemize{ \item{term}{definition} }
+Replace: \describe{ \item{term}{definition} }
+```
+- Also escape literal braces with `\{` and `\}`
+- Show each change since context matters
+
+**FIX-FORTRAN-KIND: Fix non-portable Fortran KIND** (COMP-08)
+```
+Search: src/*.f, src/*.f90
+Pattern: INTEGER(KIND=4), REAL(KIND=8), REAL*8
+Replace: Use SELECTED_INT_KIND()/SELECTED_REAL_KIND()
+```
+- Show each replacement since the right KIND depends on needed precision
+
 #### Tier 3: Requires User Input (Ask Before Fixing)
 
 These need human judgment. Ask the user what they want.
@@ -252,6 +292,31 @@ Search: src/Makevars, src/Makevars.win
 Pattern: ifeq, ifneq, ${shell}, ${wildcard}, +=, :=
 ```
 - Ask user: rewrite using only POSIX make, OR add SystemRequirements: GNU make?
+
+**FIX-DUAL-LICENSE: Resolve dual licensing** (LIC-03)
+```
+Search: R/*.R, src/*
+Pattern: Per-file license headers that differ from DESCRIPTION License
+```
+- Ask user: unify to a single license, or restructure copyright attribution?
+- CRAN's position: "A package can only be licensed as a whole"
+
+**FIX-RUST-VENDOR: Vendor Rust crate dependencies** (COMP-09)
+```
+Search: src/rust/, Cargo.toml
+Pattern: Missing vendor/ directory, missing configure script, missing AUTHORS
+```
+- Ask user to run `cargo vendor` and commit the vendor directory
+- Help create configure script that reports rustc version
+- Generate AUTHORS file from Cargo.toml
+
+**FIX-RATE-LIMIT: Add rate limiting awareness** (NET-03)
+```
+Search: R/*.R
+Pattern: HTTP request functions without rate-limiting
+```
+- Ask user about appropriate delay between requests
+- Suggest exponential backoff pattern, response caching, Retry-After header support
 
 ### Step 3: Regenerate Documentation
 

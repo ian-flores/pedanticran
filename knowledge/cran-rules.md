@@ -112,6 +112,33 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Bump patch version for resubmissions (0.3.1 → 0.3.2).
 - **Files**: `DESCRIPTION`
 
+### DESC-13: Stale Date Field
+
+- **Severity**: REJECTION
+- **Rule**: If the DESCRIPTION Date field is more than a month old at submission time, CRAN rejects. "The Date field is over a month old."
+- **CRAN says**: "The Date field is over a month old."
+- **Detection**: Parse Date field, compare to current date. Flag if >30 days old.
+- **Fix**: Update Date field to today's date, or remove it entirely (Date is optional — CRAN derives it from the tarball).
+- **Files**: `DESCRIPTION`
+
+### DESC-14: Version Component Size
+
+- **Severity**: NOTE
+- **Rule**: Version components larger than 9000 trigger a NOTE. Development versions like 0.1.0.9001 are fine, but something like 1.0.12345 will be flagged.
+- **CRAN says**: NOTE about "large version component"
+- **Detection**: Parse Version field, check if any component > 9000.
+- **Fix**: Use a smaller version number. Follow standard x.y.z convention.
+- **Files**: `DESCRIPTION`
+
+### DESC-15: Use Straight Quotes Only
+
+- **Severity**: REJECTION
+- **Rule**: DESCRIPTION file must use straight (ASCII) quotes, not directed/smart/curly quotes. Unicode quotes like \u2018, \u2019, \u201C, \u201D are rejected.
+- **CRAN says**: "non-ASCII characters in DESCRIPTION" or encoding issues with smart quotes.
+- **Detection**: Grep DESCRIPTION for Unicode quotation marks (\u2018 \u2019 \u201C \u201D or their UTF-8 bytes).
+- **Fix**: Replace all smart/curly quotes with straight ASCII quotes (' and ").
+- **Files**: `DESCRIPTION`
+
 ---
 
 ## Category: Code Behavior
@@ -339,6 +366,33 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Remove the `CXX_STD` line entirely (R defaults to C++17+). If C++17 features are needed explicitly, use `CXX_STD = CXX17`.
 - **Files**: `src/Makevars`, `src/Makevars.win`
 
+### COMP-07: Strict C Function Prototypes
+
+- **Severity**: NOTE → REJECTION
+- **Rule**: C functions with empty parameter lists (`int foo()`) must use explicit void: `int foo(void)`. GCC 14+ with `-Wstrict-prototypes` flags these. R 4.4+ enables this warning.
+- **CRAN says**: WARNING about "function declaration isn't a prototype" or strict-prototypes.
+- **Detection**: Grep src/*.c, src/*.h for function declarations/definitions with empty parentheses: `\w+\s*\(\s*\)` that aren't after `=` or `,` (to avoid false positives on function calls).
+- **Fix**: Add `void` to empty parameter lists: `int foo()` → `int foo(void)`.
+- **Files**: `src/*.c`, `src/*.h`
+
+### COMP-08: Fortran KIND Portability
+
+- **Severity**: NOTE → REJECTION
+- **Rule**: Hardcoded Fortran KIND values like `INTEGER(KIND=4)`, `REAL(KIND=8)`, `REAL*8` are not portable across platforms (KIND values are compiler-specific). R 4.4+ flags these.
+- **CRAN says**: WARNING about non-portable Fortran KIND specifications.
+- **Detection**: Grep src/*.f, src/*.f90, src/*.f95 for `KIND\s*=\s*\d+`, `INTEGER\*\d+`, `REAL\*\d+`.
+- **Fix**: Use `SELECTED_INT_KIND()` and `SELECTED_REAL_KIND()` instead of hardcoded values. E.g., `INTEGER(KIND=SELECTED_INT_KIND(9))` instead of `INTEGER(KIND=4)`.
+- **Files**: `src/*.f`, `src/*.f90`, `src/*.f95`
+
+### COMP-09: Rust Package Requirements
+
+- **Severity**: REJECTION
+- **Rule**: R packages using Rust (via cargo) must: (1) vendor all crate dependencies (no network access during build), (2) report rustc version before compilation, (3) include AUTHORS file listing all crate authors. Formalized as policy since 2023.
+- **CRAN says**: Rejects packages that download Rust crates during installation or don't vendor dependencies.
+- **Detection**: Check for `src/rust/` or `Cargo.toml`. If present, verify `vendor/` directory exists. Check for `configure` script that prints rustc version. Check for `AUTHORS` file.
+- **Fix**: Run `cargo vendor` and commit the vendor directory. Add configure script that runs `rustc --version`. Create AUTHORS file from `Cargo.toml` contributor fields.
+- **Files**: `src/rust/`, `Cargo.toml`, `configure`, `AUTHORS`
+
 ---
 
 ## Category: Documentation
@@ -403,6 +457,24 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Replace with canonical form.
 - **Files**: `R/*.R`, `man/*.Rd`, `DESCRIPTION`, `vignettes/*.Rmd`
 
+### DOC-08: Lost Braces in Rd Documentation
+
+- **Severity**: REJECTION
+- **Rule**: R 4.3+ added `\doi{}`, `\href{}`, `\url{}` macros in Rd. Unescaped literal braces `{` `}` in Rd files now cause parsing errors. Also affects `\itemize{}` blocks using description-style items (`\item{term}{definition}` is for `\describe{}`, not `\itemize{}`).
+- **CRAN says**: "Lost braces" or "unknown macro" in Rd parsing. Affected 3000+ packages when R 4.4 enforced stricter checking.
+- **Detection**: Run `R CMD check` and look for "Lost braces" warnings. Statically: grep man/*.Rd for unescaped `{` or `}` outside of known macros. Check for `\itemize{ \item{...}{...} }` patterns (should use `\describe{}` instead).
+- **Fix**: Escape literal braces with `\{` and `\}`. Replace `\itemize{ \item{term}{def} }` with `\describe{ \item{term}{def} }`. If using roxygen2, update to roxygen2 >= 7.3.0 which handles this automatically.
+- **Files**: `man/*.Rd`, `R/*.R` (if using roxygen2)
+
+### DOC-09: HTML5 Rd Validation
+
+- **Severity**: NOTE → REJECTION
+- **Rule**: R 4.4+ validates Rd-generated HTML against HTML5 spec. Rd files producing elements removed from HTML5 (like `<font>`, `<center>`, `<strike>`) are flagged.
+- **CRAN says**: NOTE about HTML validation issues in rendered help pages.
+- **Detection**: Check man/*.Rd for raw HTML that uses deprecated HTML5 elements.
+- **Fix**: Remove deprecated HTML elements from Rd files. Use standard Rd formatting macros instead.
+- **Files**: `man/*.Rd`, `R/*.R`
+
 ---
 
 ## Category: Licensing
@@ -422,6 +494,15 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Compare with previous CRAN version (if update). Flag if License field changed.
 - **Fix**: Add note to cran-comments.md and submission form.
 - **Files**: `DESCRIPTION`, `cran-comments.md`
+
+### LIC-03: No Dual Licensing Within Package
+
+- **Severity**: REJECTION
+- **Rule**: A package must be licensed as a whole under one license (or a standard compound like "GPL-2 | GPL-3"). Individual files cannot have different licenses from the package. CRAN's position: "A package can only be licensed as a whole."
+- **CRAN says**: "A package can only be licensed as a whole."
+- **Detection**: Check for per-file license headers that differ from the DESCRIPTION License field. Check for LICENSE.md files referencing multiple different licenses for different components.
+- **Fix**: Choose a single license for the entire package. If incorporating code from other licenses, ensure license compatibility and note copyright holders in Authors@R with cph role.
+- **Files**: `DESCRIPTION`, `LICENSE`, `R/*.R`, `src/*`
 
 ---
 
@@ -511,6 +592,15 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep for `http://` URLs (excluding localhost).
 - **Fix**: Replace `http://` with `https://`.
 - **Files**: `R/*.R`, `man/*.Rd`, `DESCRIPTION`, `vignettes/*.Rmd`, `README.md`
+
+### NET-03: Rate Limit Policy
+
+- **Severity**: REJECTION
+- **Rule**: Package code must be mindful of rate limiting on external APIs. CRAN policy revision 6277 (Aug 2024) explicitly requires packages to avoid triggering HTTP 429/403 responses, especially in automated contexts (CRAN check farms hit APIs from shared IPs).
+- **CRAN says**: "Packages should be written with awareness that they will be run on shared infrastructure" (paraphrased from policy revision).
+- **Detection**: Find HTTP request code. Check for rate-limiting awareness: retry logic with backoff, configurable delays, caching of responses. Flag packages making many sequential HTTP requests without delays.
+- **Fix**: Add exponential backoff for retry logic. Cache responses where possible. Add configurable delay between requests. Respect Retry-After headers.
+- **Files**: `R/*.R`
 
 ---
 
@@ -627,3 +717,12 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep src/Makevars for GNU make extensions. Check if SystemRequirements includes "GNU make".
 - **Fix**: Either use only POSIX make features, or add `SystemRequirements: GNU make` to DESCRIPTION.
 - **Files**: `src/Makevars`, `src/Makevars.win`, `DESCRIPTION`
+
+### MISC-06: NEWS File Format Validation
+
+- **Severity**: NOTE
+- **Rule**: R 4.3+ applies stricter parsing to NEWS and NEWS.md files. Malformed headings, inconsistent version numbering, or non-standard date formats cause NOTEs.
+- **CRAN says**: NOTE about "Cannot extract version info from the following section titles" or similar NEWS parsing warnings.
+- **Detection**: If NEWS.md exists, check that version headings match pattern `# package version` or `# package version (date)`. Check that versions are valid R version strings.
+- **Fix**: Use standard format: `# packagename 1.2.3` or `# packagename 1.2.3 (2024-01-15)`. Use `usethis::use_news_md()` for template.
+- **Files**: `NEWS.md`, `NEWS`
