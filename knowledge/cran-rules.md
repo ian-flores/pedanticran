@@ -726,3 +726,502 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: If NEWS.md exists, check that version headings match pattern `# package version` or `# package version (date)`. Check that versions are valid R version strings.
 - **Fix**: Use standard format: `# packagename 1.2.3` or `# packagename 1.2.3 (2024-01-15)`. Use `usethis::use_news_md()` for template.
 - **Files**: `NEWS.md`, `NEWS`
+
+---
+
+## Category: Encoding
+
+### ENC-01: Missing Encoding Field in DESCRIPTION
+
+- **Severity**: WARNING
+- **Rule**: If the DESCRIPTION file contains any non-ASCII characters (in Title, Description, Authors@R, or any field), the `Encoding:` field must be present. Only three encodings are portable: `UTF-8`, `latin1`, `latin2`. UTF-8 is strongly recommended.
+- **CRAN says**: "If the DESCRIPTION file is not entirely in ASCII it should contain an 'Encoding' field."
+- **Detection**: Read DESCRIPTION as bytes. If any byte > 0x7F exists, check that the `Encoding:` field is present.
+- **Fix**: Add `Encoding: UTF-8` to DESCRIPTION.
+- **Files**: `DESCRIPTION`
+
+### ENC-02: Non-ASCII Characters in R Source Code
+
+- **Severity**: WARNING
+- **Rule**: R source files must use only ASCII characters in code. Non-ASCII characters in string literals must use `\uxxxx` or `\U{xxxxxxxx}` escape sequences. Non-ASCII in comments is tolerated but discouraged. Non-ASCII in identifiers (variable names, function names) is always rejected.
+- **CRAN says**: "Portable packages must use only ASCII characters in their R code, except perhaps in comments. Use \\uxxxx escapes for other characters."
+- **Detection**: Read each `R/*.R` file as bytes. For each line, check if any byte > 0x7F exists. Skip lines that are pure comments (start with `#` after optional whitespace).
+- **Fix**: Replace non-ASCII characters in strings with `\uxxxx` escape sequences. Use `stringi::stri_escape_unicode()` to convert.
+- **Files**: `R/*.R`
+
+### ENC-03: Non-Portable \x Escape Sequences
+
+- **Severity**: REJECTION
+- **Rule**: Using `\xNN` escape sequences for non-ASCII characters in R strings is non-portable because `\x` produces raw bytes interpreted according to the locale's encoding. The portable alternative is `\uNNNN` which always produces Unicode code points.
+- **CRAN says**: "Change strings to use \\u escapes instead of \\x, as the latter was only correct under Latin-1 encoding but not portable."
+- **Detection**: Scan `R/*.R` files for `\x[0-9a-fA-F]{2}` patterns where the hex value is >= 0x80 (non-ASCII range).
+- **Fix**: Replace `\xNN` with the equivalent `\uNNNN` Unicode escape. For example, `\xe9` (e-acute in Latin-1) becomes `\u00e9`.
+- **Files**: `R/*.R`
+
+### ENC-04: UTF-8 BOM in Source Files
+
+- **Severity**: WARNING
+- **Rule**: UTF-8 files must not include a Byte Order Mark (BOM, byte sequence EF BB BF). BOMs cause invisible characters in string comparisons, broken column names in data files, and LaTeX compilation failures for vignettes.
+- **CRAN says**: "Found non-ASCII strings ... which cannot be translated" (when BOM causes parsing issues)
+- **Detection**: Read the first 3 bytes of each source file (R/*.R, man/*.Rd, vignettes/*.Rmd, DESCRIPTION, NAMESPACE). Check if they are EF BB BF.
+- **Fix**: Remove the BOM. Most editors can save as "UTF-8 without BOM". In code: read the file, strip the leading BOM bytes, write back.
+- **Files**: `R/*.R`, `man/*.Rd`, `vignettes/*.Rmd`, `DESCRIPTION`, `NAMESPACE`
+
+### ENC-05: Missing VignetteEncoding Declaration
+
+- **Severity**: WARNING
+- **Rule**: Vignette source files (.Rmd, .Rnw) must declare their encoding via `%\VignetteEncoding{UTF-8}`. Without this, vignette builds may fail on CRAN check platforms with different default locales.
+- **CRAN says**: "The encoding is not UTF-8. We will only support UTF-8 in the future."
+- **Detection**: Find all vignette files in `vignettes/` directory (.Rmd, .Rnw, .Rtex). Check for `%\VignetteEncoding{` directive.
+- **Fix**: Add `%\VignetteEncoding{UTF-8}` to the vignette preamble. For .Rmd files, this goes in the YAML header area.
+- **Files**: `vignettes/*.Rmd`, `vignettes/*.Rnw`, `vignettes/*.Rtex`
+
+### ENC-06: Unmarked UTF-8 Strings in Data Files
+
+- **Severity**: NOTE
+- **Rule**: When R data files (.rda, .RData) contain strings with non-ASCII characters, each string should have its encoding properly marked (via `Encoding()` function). Unmarked non-ASCII strings produce a warning that can block acceptance.
+- **CRAN says**: "Found N unmarked UTF-8 strings"
+- **Detection**: Cannot fully detect without R. The encoding marking is internal to the serialized R object. Heuristic: if data files exist and DESCRIPTION has no `Encoding: UTF-8`, flag as a potential issue.
+- **Fix**: In R, use `Encoding(x) <- "UTF-8"` for character vectors before saving. Use `tools:::.check_package_datasets()` to find problematic data.
+- **Files**: `data/*.rda`, `data/*.RData`
+
+### ENC-07: Non-ASCII in NAMESPACE File
+
+- **Severity**: REJECTION
+- **Rule**: The NAMESPACE file must contain only ASCII characters. Non-ASCII can appear if function names contain non-ASCII characters, or if the file was edited with an editor that inserted smart quotes or em-dashes.
+- **CRAN says**: "Portable packages must use only ASCII characters in their R code and NAMESPACE directives."
+- **Detection**: Read NAMESPACE file as bytes. Check if any byte > 0x7F exists.
+- **Fix**: Replace non-ASCII characters with ASCII equivalents. Regenerate NAMESPACE with roxygen2 if applicable.
+- **Files**: `NAMESPACE`
+
+### ENC-08: Non-ASCII in Rd Files Without Encoding Declaration
+
+- **Severity**: WARNING
+- **Rule**: Rd files that contain non-ASCII characters must have their encoding declared. If DESCRIPTION has `Encoding: UTF-8`, that serves as the default for all Rd files. Otherwise, individual Rd files need `\encoding{UTF-8}`. Without proper encoding, the PDF manual build fails.
+- **CRAN says**: "checking PDF version of manual ... WARNING" (LaTeX cannot handle undeclared non-ASCII characters)
+- **Detection**: Check if DESCRIPTION has `Encoding:` field. For each `man/*.Rd` file with non-ASCII bytes, check that either DESCRIPTION has an Encoding field or the Rd file has an `\encoding{}` directive.
+- **Fix**: Add `Encoding: UTF-8` to DESCRIPTION (preferred, covers all Rd files). Or add `\encoding{UTF-8}` to individual Rd files. If using roxygen2, add `@encoding UTF-8` tag.
+- **Files**: `man/*.Rd`, `DESCRIPTION`
+
+---
+
+## Category: Vignettes
+
+### VIG-01: VignetteBuilder Not Declared in DESCRIPTION
+
+- **Severity**: REJECTION
+- **Rule**: If the package has vignette source files in `vignettes/` using a non-Sweave engine (knitr, rmarkdown, quarto), the DESCRIPTION must declare `VignetteBuilder`. For `knitr::rmarkdown` vignettes, both knitr AND rmarkdown must be in `VignetteBuilder` and listed in Suggests (or Imports).
+- **CRAN says**: "Package has 'vignettes' subdirectory but apparently no vignettes. Perhaps the 'VignetteBuilder' information is missing from the DESCRIPTION file?"
+- **Detection**: Parse DESCRIPTION for `VignetteBuilder` field. Scan `vignettes/*.Rmd` and `vignettes/*.Rnw` for `%\VignetteEngine{...}` declarations. If vignettes use `knitr::rmarkdown`, verify both `knitr` and `rmarkdown` appear in VignetteBuilder and in Suggests/Imports. If vignettes exist but no VignetteBuilder is declared, flag.
+- **Fix**: Add `VignetteBuilder: knitr` (or `knitr, rmarkdown`) to DESCRIPTION. Add both packages to Suggests.
+- **Files**: `DESCRIPTION`, `vignettes/*.Rmd`, `vignettes/*.Rnw`
+
+### VIG-02: Missing VignetteEngine/VignetteIndexEntry/VignetteEncoding Metadata
+
+- **Severity**: REJECTION (VignetteEngine), NOTE (placeholder title), NOTE (encoding)
+- **Rule**: Every vignette source file must contain three metadata declarations: `%\VignetteIndexEntry{Descriptive Title}` (a real title, NOT the placeholder "Vignette Title"), `%\VignetteEngine{knitr::rmarkdown}` (declares which engine processes the file), and `%\VignetteEncoding{UTF-8}` (must be UTF-8).
+- **CRAN says**: "Files named as vignettes but with no recognized vignette engine: (Is a VignetteBuilder field missing?)" / NOTE "Vignette with placeholder title 'Vignette Title'"
+- **Detection**: Parse each file in `vignettes/` for the three `%\Vignette*` declarations. Check VignetteIndexEntry is not "Vignette Title" or other obvious placeholder text. Verify VignetteEngine matches an engine declared in DESCRIPTION's VignetteBuilder. Verify VignetteEncoding is UTF-8.
+- **Fix**: Add missing metadata declarations to vignette YAML frontmatter. Replace placeholder titles with descriptive ones. The VignetteIndexEntry should match the document's `title:` field.
+- **Files**: `vignettes/*.Rmd`, `vignettes/*.Rnw`
+
+### VIG-03: Stale Pre-built Vignettes in inst/doc
+
+- **Severity**: WARNING
+- **Rule**: If `inst/doc/` exists and contains compiled vignettes (.html, .pdf), they must match the current source vignettes in `vignettes/`. Stale pre-built vignettes cause R CMD build to silently use old versions instead of rebuilding. The `inst/doc/` directory should generally be in `.gitignore`.
+- **CRAN says**: "Files in the 'vignettes' directory but no files in 'inst/doc'" / "Files in 'vignettes' but not in 'inst/doc': [filenames]" / "'inst/doc' files newer than 'vignettes' sources"
+- **Detection**: If `inst/doc/` exists, check that for every `.Rmd`/`.Rnw` in `vignettes/`, a corresponding `.html`/`.pdf` exists in `inst/doc/`. Compare modification timestamps: if source is newer than compiled output, flag as stale. If `inst/doc/` has files with NO corresponding source in `vignettes/`, flag as orphaned. Flag any `inst/doc/` that is NOT in `.gitignore`.
+- **Fix**: Delete `inst/doc/` and rebuild with `R CMD build`. Add `inst/doc` to `.gitignore`. Use `devtools::build()` which handles this correctly.
+- **Files**: `inst/doc/`, `vignettes/`, `.gitignore`
+
+### VIG-04: Vignette Build Dependencies Not Declared
+
+- **Severity**: REJECTION
+- **Rule**: Every package loaded or used in vignette code (`library()`, `require()`, `pkg::func()`) must be listed in DESCRIPTION's Imports or Suggests. Packages only used in vignettes should be in Suggests. Additionally, `%\VignetteDepends{pkg1, pkg2}` can declare strong vignette-only dependencies.
+- **CRAN says**: "Package suggested but not available: 'pkgname'" / vignette build fails with "there is no package called 'pkgname'"
+- **Detection**: Extract all `library(pkg)`, `require(pkg)`, and `pkg::func()` calls from vignette R code chunks. Cross-reference against DESCRIPTION Imports and Suggests fields. Flag any package used in vignettes but not declared in DESCRIPTION.
+- **Fix**: Add missing packages to Suggests. Use `%\VignetteDepends{pkg}` in vignette YAML for packages needed unconditionally during vignette build. For packages that may not be available, add `eval = requireNamespace("pkg", quietly = TRUE)` to chunk options.
+- **Files**: `vignettes/*.Rmd`, `DESCRIPTION`
+
+### VIG-05: HTML Vignette Size — html_document vs html_vignette
+
+- **Severity**: NOTE
+- **Rule**: HTML vignettes using `output: html_document` embed a large Bootstrap/jQuery payload (~600KB) vs `html_vignette` (~10KB). Combined with base64-encoded plots, this can push documentation size past the 5MB limit or inflate the tarball beyond 10MB.
+- **CRAN says**: NOTE about "installed size is X" or doc directory being too large.
+- **Detection**: Check `vignettes/*.Rmd` for `output: html_document` (vs lighter `html_vignette`). If `inst/doc/*.html` exists, check file sizes (flag if any single HTML > 1MB). Check for `self_contained: true` (default for html_document) which embeds all images as base64.
+- **Fix**: Use `rmarkdown::html_vignette` instead of `html_document`. Set lower DPI: `knitr::opts_chunk$set(dpi = 72)`. Compress PNG images. Set reasonable figure dimensions.
+- **Files**: `vignettes/*.Rmd`, `inst/doc/*.html`
+
+### VIG-06: Vignette Data Files in Wrong Location
+
+- **Severity**: WARNING
+- **Rule**: Data files used by vignettes must be accessible during both `R CMD build` (which builds from `vignettes/`) and `R CMD check` (which rebuilds from `inst/doc/`). If data files are in `vignettes/` but not copied to `inst/doc/`, R CMD check will error when trying to rebuild.
+- **CRAN says**: Vignette rebuild fails with file-not-found errors during R CMD check.
+- **Detection**: Scan vignette R code chunks for file-reading calls (`read.csv()`, `readRDS()`, `read.table()`, `readLines()`, etc.) with relative paths. Verify these files are either in `inst/` (accessible via `system.file()`), generated by vignette code, or listed in `vignettes/.install_extras`.
+- **Fix**: Move data files to `inst/extdata/` and reference via `system.file("extdata", "file.csv", package = "pkgname")`. Or add a `.install_extras` file in `vignettes/` listing the data files. Or generate data programmatically within the vignette.
+- **Files**: `vignettes/`, `inst/extdata/`, `vignettes/.install_extras`
+
+### VIG-07: Vignette CPU Time Exceeds CRAN Threshold
+
+- **Severity**: NOTE
+- **Rule**: Vignette rebuilding must not have CPU time significantly exceeding elapsed time (ratio > 2.5x suggests parallel processing). Dependencies like data.table or RcppParallel may spawn threads during vignette execution.
+- **CRAN says**: "Re-building vignettes had CPU time 4.1 times elapsed time"
+- **Detection**: Scan vignette R chunks for parallel processing calls: `parallel::`, `mclapply`, `future::plan`, `foreach`, `data.table::setDTthreads`. Check for multi-threaded dependencies in Imports (data.table, RcppParallel, furrr). Verify thread-limiting code exists.
+- **Fix**: Add thread-limiting setup chunk: `data.table::setDTthreads(2)`, `Sys.setenv(OMP_NUM_THREADS = 2, MC_CORES = 2)`. Use `\donttest{}` for computationally intensive sections. Pre-compute expensive vignettes using `.Rmd.orig` workflow.
+- **Files**: `vignettes/*.Rmd`, `DESCRIPTION`
+
+### VIG-08: Custom Vignette Engine Bootstrap Failure
+
+- **Severity**: NOTE
+- **Rule**: Packages that define their own vignette engine (e.g., quarto, R.rsp, bookdown) face a chicken-and-egg problem: R CMD check queries `tools:::vignetteEngine()` which only finds engines from installed packages. If the package itself provides the engine, it may not be installed yet during check.
+- **CRAN says**: "Package has 'vignettes' subdirectory but apparently no vignettes. Perhaps the 'VignetteBuilder' information is missing from the DESCRIPTION file?"
+- **Detection**: Check if DESCRIPTION's `VignetteBuilder` lists the package itself (self-referencing engine). Check if `VignetteBuilder` lists a package that is not widely installed on CRAN check farms. Flag as informational warning for manual review.
+- **Fix**: For self-referencing engines, ensure the package's `.onLoad()` properly registers the engine. Pre-build vignettes so the check step doesn't need the engine. Use `R.rsp::asis` for truly static vignettes. Test on multiple platforms (Linux Debian specifically) before submitting.
+- **Files**: `DESCRIPTION`, `R/zzz.R`
+
+---
+
+## Category: NAMESPACE
+
+### NS-01: Import Conflicts / Namespace Collisions
+
+- **Severity**: WARNING
+- **Rule**: When two imported packages export the same function name and both are imported via `import()` or `importFrom()`, R generates "Replacing previous import" warnings during namespace loading. This blocks CRAN submission.
+- **CRAN says**: "Replacing previous import 'shinydashboard::taskItem' by 'shinydashboardPlus::taskItem'"
+- **Detection**: Parse NAMESPACE for all `import()` and `importFrom()` directives. When two `importFrom()` directives import the same function name from different packages, flag it. When `import()` is used for multiple packages, flag as high-risk for collisions.
+- **Fix**: Use `importFrom()` selectively. When conflict is unavoidable, use `import(pkg, except=c("conflicting_fun"))` (R >= 3.6.0) or only `importFrom()` the specific functions needed from each package.
+- **Files**: `NAMESPACE`
+
+### NS-02: Prefer importFrom over import
+
+- **Severity**: NOTE
+- **Rule**: Using `import(entire_package)` in NAMESPACE instead of selective `importFrom(pkg, fun1, fun2)` is discouraged by CRAN guidelines and Bioconductor policy. Human reviewers may request changes, especially for new packages.
+- **CRAN says**: "Using importFrom selectively rather than import is good practice and recommended notably when importing from packages with more than a dozen exports." (Writing R Extensions)
+- **Detection**: Parse NAMESPACE for `import()` directives (as opposed to `importFrom()`). Flag any `import(pkg)` usage. Particularly flag when multiple `import()` directives exist.
+- **Fix**: Replace `import(pkg)` with specific `importFrom(pkg, fun1, fun2, ...)` for each function actually used. If using roxygen2, replace `@import pkg` with `@importFrom pkg fun1 fun2`.
+- **Files**: `NAMESPACE`
+
+### NS-03: S3 Method Exported but Not Registered via S3method()
+
+- **Severity**: NOTE
+- **Rule**: Functions that look like S3 methods (e.g., `print.myclass`, `summary.myclass`) that are `export()`-ed but not registered via `S3method()` trigger a NOTE that human reviewers consistently reject.
+- **CRAN says**: "Found the following apparent S3 methods exported but not registered: [function names]. See section 'Registering S3 methods' in the 'Writing R Extensions' manual."
+- **Detection**: Parse NAMESPACE for `export()` directives where the function name matches `generic.class` pattern (where generic is a known S3 generic like print, summary, format, plot, `[`, `[[`, `$`, as.data.frame, etc.) and is not also registered via `S3method()`.
+- **Fix**: For roxygen2 users, use `@export` on S3 methods (roxygen2 >= 7.0 automatically generates `S3method()`). For manual NAMESPACE: replace `export(print.myclass)` with `S3method(print, myclass)`.
+- **Files**: `NAMESPACE`
+
+### NS-04: Broad exportPattern
+
+- **Severity**: NOTE
+- **Rule**: Using `exportPattern("^[[:alpha:]]")` or similar broad patterns exports all functions starting with a letter, including internal helpers. CRAN human reviewers flag this, especially for new packages.
+- **CRAN says**: "Exporting all functions with exportPattern('^[[:alpha:]]+') is strongly discouraged and almost always not allowed." (Bioconductor, mirrored by CRAN)
+- **Detection**: Parse NAMESPACE for `exportPattern()` directives. Flag any pattern that is broadly permissive (matches most function names), including `exportPattern(".")`, `exportPattern("^[[:alpha:]]")`, `exportPattern("^[^\\.]")`.
+- **Fix**: Replace `exportPattern()` with explicit `export()` directives for each public function. If using roxygen2, tag each public function with `@export` and ensure internal helpers lack this tag.
+- **Files**: `NAMESPACE`
+
+### NS-05: Depends vs Imports Misuse
+
+- **Severity**: NOTE
+- **Rule**: Packages listed in `Depends:` are loaded onto the user's search path. CRAN prefers packages in `Imports:` unless they genuinely need to be on the search path (e.g., for user-facing data or extending another package's classes).
+- **CRAN says**: "The 'Depends' field should nowadays be used rarely, only for packages which are intended to be put on the search path to make their facilities available to the end user (and not to the package itself)." (Writing R Extensions)
+- **Detection**: Parse DESCRIPTION for `Depends:` field. Flag any package listed in `Depends` that is not `R` itself (version constraint) or `methods` (needed for S4). Cross-reference with NAMESPACE to check if the Depends package is also imported.
+- **Fix**: Move packages from `Depends:` to `Imports:` in DESCRIPTION. Add corresponding `importFrom()` directives in NAMESPACE (or `@importFrom` in roxygen2).
+- **Files**: `DESCRIPTION`, `NAMESPACE`
+
+### NS-06: No Visible Binding / Missing importFrom
+
+- **Severity**: NOTE
+- **Rule**: When R code uses functions from other packages without proper `importFrom()` or `::` qualification, R CMD check generates "no visible global function definition" or "no visible binding for global variable" NOTEs. Human reviewers consistently reject packages with these, especially new submissions.
+- **CRAN says**: "no visible global function definition for 'foo'"
+- **Detection**: Requires R-level analysis. Partial detection: check that packages in DESCRIPTION `Imports:` have corresponding `importFrom()` or `import()` in NAMESPACE (if not, they may rely on `::` syntax, which is valid but worth verifying).
+- **Fix**: For each function from another package, either use `pkg::fun()` syntax in code, or add `importFrom(pkg, fun)` to NAMESPACE / `@importFrom pkg fun` in roxygen2. For non-standard evaluation variables (e.g., dplyr column names), use `.data$col` or `utils::globalVariables()`.
+- **Files**: `NAMESPACE`, `R/*.R`
+
+### NS-07: Re-Export Documentation Requirements
+
+- **Severity**: NOTE
+- **Rule**: When re-exporting functions from other packages (e.g., the pipe `%>%` from magrittr), the re-exported function must have its own documentation page with `@return` tag. Missing documentation for re-exports triggers DOC-01 violations.
+- **CRAN says**: "Please add \\value to .Rd files regarding exported methods."
+- **Detection**: Parse NAMESPACE for patterns where a function is both `importFrom()`-ed and `export()`-ed (suggesting re-export). Check that corresponding .Rd documentation exists.
+- **Fix**: Use roxygen2's `@importFrom pkg fun` + `@export` pattern, which generates proper re-export documentation. Or create a `R/reexports.R` file with roxygen2 blocks for re-exported objects.
+- **Files**: `NAMESPACE`, `man/*.Rd`
+
+---
+
+## Category: Data
+
+### DATA-01: Undocumented Datasets
+
+- **Severity**: REJECTION
+- **Rule**: Every dataset in `data/` must have a documentation entry. R CMD check requires all user-level objects to be documented.
+- **CRAN says**: "Undocumented data sets: [dataset names]. All user-level objects in a package should have documentation entries."
+- **Detection**: For each `.rda` or `.RData` file in `data/`, check that a corresponding `\alias{}` exists in `man/*.Rd` (with `\docType{data}`) or that the dataset name appears in an `@name` or `@rdname` roxygen block in `R/*.R`.
+- **Fix**: Create roxygen2 documentation for each dataset, typically in `R/data.R`:
+  ```r
+  #' Dataset Title
+  #'
+  #' Description of the dataset.
+  #'
+  #' @format A data frame with N rows and M variables:
+  #' \describe{
+  #'   \item{col1}{Description}
+  #' }
+  #' @source \url{https://example.com}
+  "dataset_name"
+  ```
+- **Files**: `data/*.rda`, `data/*.RData`, `man/*.Rd`, `R/*.R`
+
+### DATA-02: LazyData Without data/ Directory
+
+- **Severity**: NOTE
+- **Rule**: Setting `LazyData: true` in DESCRIPTION when no `data/` directory exists triggers a NOTE. This commonly happens from scaffolding tools like `usethis::create_package()`.
+- **CRAN says**: "checking LazyData ... NOTE 'LazyData' is specified without a 'data' directory"
+- **Detection**: Parse DESCRIPTION for `LazyData: true` (or `yes`). Check if `data/` directory exists.
+- **Fix**: Remove `LazyData: true` from DESCRIPTION if no `data/` directory exists.
+- **Files**: `DESCRIPTION`
+
+### DATA-03: Missing LazyData When data/ Has .rda Files
+
+- **Severity**: NOTE
+- **Rule**: When shipping `.rda` or `.RData` files in `data/`, best practice strongly recommends `LazyData: true` so users can access datasets without calling `data()`. Without it, users must call `data("dataset")` explicitly.
+- **CRAN says**: Best practice per R-pkgs.org: "If you're shipping .rda files below data/, include LazyData: true in DESCRIPTION."
+- **Detection**: Check if `data/` directory contains `.rda` or `.RData` files but `LazyData` is missing or set to `false`/`no` in DESCRIPTION.
+- **Fix**: Add `LazyData: true` to DESCRIPTION. For very large datasets, create a `data/datalist` file instead.
+- **Files**: `DESCRIPTION`, `data/`
+
+### DATA-04: Suboptimal Data Compression
+
+- **Severity**: WARNING
+- **Rule**: Data files should use optimal compression. R CMD check warns when significantly better compression is available. When `LazyData: true` is set and data exceeds 1MB, the `LazyDataCompression` field should be set.
+- **CRAN says**: "checking data for ASCII and uncompressed saves ... WARNING. Note: significantly better compression could be obtained by using R CMD build --resave-data"
+- **Detection**: Check if `LazyData: true` is set, total data directory size exceeds 1MB, and `LazyDataCompression` field is missing from DESCRIPTION. Flag individual `.rda` files > 100KB as candidates for better compression.
+- **Fix**: Run `tools::resaveRdaFiles("data/", compress = "auto")` or set `LazyDataCompression: xz` in DESCRIPTION. Alternatively, use `R CMD build --resave-data`.
+- **Files**: `DESCRIPTION`, `data/*.rda`
+
+### DATA-05: Data Size Exceeds 5MB Limit
+
+- **Severity**: REJECTION
+- **Rule**: CRAN policy states "neither data nor documentation should exceed 5MB" and "packages should be of the minimum necessary size." R-pkgs.org recommends data under 1MB.
+- **CRAN says**: "Data exceeded 5MB limit." / "Packages should be of the minimum necessary size."
+- **Detection**: Sum all file sizes in `data/` directory. Error if total exceeds 5MB (hard limit). Warn if total exceeds 1MB (soft recommendation).
+- **Fix**: Use better compression (`tools::resaveRdaFiles()`), reduce dataset size, create a separate data-only package, move data to `inst/extdata/` with download functions, or host large data externally with accessor functions.
+- **Files**: `data/`
+
+### DATA-06: Non-ASCII Characters in Data Without Proper Encoding
+
+- **Severity**: NOTE
+- **Rule**: Data containing non-ASCII character strings triggers an informational NOTE. While not blocking, it draws manual review attention.
+- **CRAN says**: "checking data for non-ASCII characters ... NOTE. Note: found N marked UTF-8 strings"
+- **Detection**: Requires R to inspect `.rda` binary contents. Without R, can only verify that DESCRIPTION includes `Encoding: UTF-8`.
+- **Fix**: Ensure character strings in data are properly marked as UTF-8 using `Encoding()`. Add `Encoding: UTF-8` to DESCRIPTION.
+- **Files**: `DESCRIPTION`, `data/*.rda`
+
+### DATA-07: Serialization Version Incompatibility
+
+- **Severity**: WARNING
+- **Rule**: Data saved with R >= 4.0 defaults to serialization version 3 (`RDA3`/`RDX3` format), which cannot be read by R < 3.5.0. This causes an automatic dependency bump.
+- **CRAN says**: "NB: this package now depends on R (>= 3.5.0). WARNING: Added dependency on R >= 3.5.0 because serialized objects in serialize/load version 3 cannot be read in older versions of R."
+- **Detection**: Read first bytes of `.rda` files to detect `RDA3`/`RDX3` magic bytes. If found and DESCRIPTION does not declare `Depends: R (>= 3.5.0)` or higher, flag it.
+- **Fix**: Re-save data with `version = 2`: `save(data, file = "data/mydata.rda", version = 2)`, or add `Depends: R (>= 3.5.0)` to DESCRIPTION.
+- **Files**: `DESCRIPTION`, `data/*.rda`
+
+### DATA-08: Internal sysdata.rda Size
+
+- **Severity**: NOTE
+- **Rule**: `R/sysdata.rda` holds internal (non-exported) data. It is always lazy-loaded regardless of the `LazyData` setting. Large internal data contributes to overall package size.
+- **CRAN says**: Flagged under general package size checks. Internal data does not need documentation.
+- **Detection**: Check for `R/sysdata.rda` existence and verify its size. Flag if > 1MB.
+- **Fix**: Keep `R/sysdata.rda` small. For large internal data, consider lazy-loading from `inst/` or external sources. Do NOT document sysdata.rda objects.
+- **Files**: `R/sysdata.rda`
+
+### DATA-09: Invalid Data File Formats in data/
+
+- **Severity**: WARNING
+- **Rule**: The `data/` directory may only contain specific file types. R CMD check validates the contents.
+- **CRAN says**: "checking contents of 'data' directory" — flags invalid file types.
+- **Detection**: List files in `data/`. Allowed extensions: `.rda`, `.RData`, `.R`, `.r`, `.tab`, `.txt`, `.csv` (optionally compressed with `.gz`, `.bz2`, `.xz`). `.rds` files are NOT allowed in `data/` — they must go in `inst/extdata/`.
+- **Fix**: Convert data to `.rda` format using `usethis::use_data()`. Move non-standard files (including `.rds`) to `inst/extdata/`.
+- **Files**: `data/`
+
+---
+
+## Category: System Requirements
+
+### SYS-01: Undeclared System Library in Compiled Code
+
+- **Severity**: WARNING
+- **Rule**: Packages that link against system libraries (libcurl, libxml2, OpenSSL, zlib, etc.) via compiled code in `src/` must declare those libraries in the `SystemRequirements` field. Without the declaration, the package fails to install on CRAN check machines when the configure script or linker cannot find the library.
+- **CRAN says**: "configuration failed because libxml-2.0 was not found" / "cannot find -lcurl" (installation failure is the rejection mechanism)
+- **Detection**: Scan `src/*.c`, `src/*.cpp`, `src/*.h` for `#include` of known system library headers (e.g., `<curl/curl.h>`, `<zlib.h>`, `<png.h>`). Also parse `src/Makevars` for `-l<library>` flags in `PKG_LIBS`. Cross-reference against `SystemRequirements` field in DESCRIPTION.
+- **Fix**: Add the library name to SystemRequirements with platform install hints: `SystemRequirements: libcurl: libcurl-devel (rpm) or libcurl4-openssl-dev (deb)`
+- **Files**: `DESCRIPTION`, `src/*.c`, `src/*.cpp`, `src/*.h`, `src/Makevars`
+
+### SYS-02: Undeclared External Program or Interpreter
+
+- **Severity**: WARNING
+- **Rule**: Packages that invoke external programs via `system()`, `system2()`, or `processx::run()` — or depend on interpreters like Python, Java, or pandoc — must declare them in `SystemRequirements`. Writing R Extensions explicitly lists Perl, Python, Tcl, BUGS, JavaScript, Matlab, PHP, and shell scripts as needing declaration.
+- **CRAN says**: "If your package requires one of these interpreters or an extension then this should be declared in the SystemRequirements field."
+- **Detection**: Grep R source files for `system()`, `system2()`, `processx::run()` calls that invoke known external programs. Check for `reticulate::` usage (Python), `rJava::` or `.jcall()` (Java), `rmarkdown::render()` (pandoc). Cross-reference against SystemRequirements.
+- **Fix**: Add the program to SystemRequirements with version if applicable: `SystemRequirements: Python (>= 3.6), pandoc (>= 2.0)`
+- **Files**: `DESCRIPTION`, `R/*.R`
+
+### SYS-03: C++20 Default Standard Transition
+
+- **Severity**: NOTE
+- **Rule**: R 4.6.0 makes C++20 the default C++ standard where available. Packages that explicitly set `CXX_STD = CXX17` in Makevars should verify compatibility with C++20 compilation. Packages still specifying `CXX_STD = CXX11` or `CXX_STD = CXX14` get a WARNING (already covered by COMP-06). Packages needing exactly C++17 should keep the explicit declaration; packages compatible with C++20 can remove `CXX_STD` entirely.
+- **CRAN says**: R 4.6.0 NEWS: "C++20 is now the default C++ standard where available."
+- **Detection**: Check if package has `src/` with C++ files. Check if `CXX_STD` is set in Makevars. If `CXX_STD = CXX17` is explicitly set, flag as informational for C++20 compatibility review.
+- **Fix**: For new packages: remove CXX_STD entirely (C++20 default is backward-compatible for most code). For packages needing exactly C++17: keep `CXX_STD = CXX17`. For packages needing C++20 features: set `CXX_STD = CXX20`.
+- **Files**: `src/Makevars`, `src/Makevars.win`
+
+### SYS-04: Configure Script Missing for System Libraries
+
+- **Severity**: WARNING
+- **Rule**: Packages that use system libraries (detected via SYS-01) should include a `configure` script that checks for required tools and provides informative error messages. The configure script must never attempt to install dependencies itself. The CRAN Repository Policy requires packages to check for the presence of required tools; for Rust packages specifically, "configure/configure.win script should check for the presence of commands cargo and rustc."
+- **CRAN says**: "The package should not attempt to install these for itself." / Configure scripts must "check for the presence of commands."
+- **Detection**: Check if `src/` exists with compiled code using system libraries (from SYS-01) but no `configure` script. If `configure` exists, grep for auto-install anti-patterns (`apt-get install`, `pip install`, `npm install` being executed rather than suggested in error messages).
+- **Fix**: Add a configure script that checks for required tools/libraries and provides informative error messages. Never attempt to install tools automatically. Use `pkg-config` or `AC_CHECK_LIB` for detection.
+- **Files**: `configure`, `configure.ac`, `src/Makevars`
+
+### SYS-05: Java .class/.jar Files Require Source
+
+- **Severity**: REJECTION
+- **Rule**: Packages containing `.class` or `.jar` files must include Java source code in a top-level `java/` directory, or that directory must explain how the sources can be obtained. This is a FOSS license compliance requirement.
+- **CRAN says**: "For Java .class and .jar files, the sources should be in a top-level java directory in the source package (or that directory should explain how they can be obtained)." / Real rejection (CirceR, April 2024): "Package has FOSS license, installs .class/.jar but has no 'java' directory."
+- **Detection**: Search for `.class` and `.jar` files anywhere in the package (especially `inst/java/`, `java/`, `inst/`). If found, check for a `java/` top-level directory. Also verify SystemRequirements mentions Java/JDK.
+- **Fix**: Create a `java/` directory containing Java source files, or include a README in `java/` explaining how to obtain the sources. Declare `SystemRequirements: Java (>= 8)` (or appropriate version).
+- **Files**: `DESCRIPTION`, `java/`, `inst/java/`, any `.jar`/`.class` files
+
+### SYS-06: Contradictory C++ Standard Between SystemRequirements and Makevars
+
+- **Severity**: WARNING
+- **Rule**: The C++ standard specified in `SystemRequirements` (e.g., "C++17") must be consistent with the `CXX_STD` setting in `src/Makevars*`. R CMD check validates this since R 4.5 and issues a warning for contradictory specifications.
+- **CRAN says**: "C++ standard specifications (CXX_STD = in 'src/Makevars*' and in the SystemRequirements field of the 'DESCRIPTION' file) are now checked more thoroughly. Invalid values are still ignored but now give a warning, as do contradictory specifications."
+- **Detection**: Parse SystemRequirements for C++ standard mentions (e.g., "C++17", "C++20", "C++11"). Parse `src/Makevars*` for `CXX_STD` setting. Flag if they contradict (e.g., SystemRequirements says C++17 but Makevars says CXX20). Also flag deprecated `SystemRequirements: C++11`.
+- **Fix**: Ensure SystemRequirements and Makevars CXX_STD agree. Best practice: specify only in Makevars (`CXX_STD`), not in SystemRequirements, unless human-readable documentation is desired.
+- **Files**: `DESCRIPTION`, `src/Makevars`, `src/Makevars.win`
+
+### SYS-07: USE_C17 Opt-Out for C23 Keyword Conflicts
+
+- **Severity**: NOTE
+- **Rule**: Packages with C23 keyword conflicts (`bool`, `true`, `false`, `nullptr` used as variable/parameter names) can temporarily opt out of C23 compilation by adding `USE_C17` to SystemRequirements. This is a temporary escape hatch; the proper fix is to rename conflicting identifiers.
+- **CRAN says**: "Packages can opt out via `SystemRequirements: USE_C17` or `R CMD INSTALL --use-C17`."
+- **Detection**: Cross-reference with COMP-01 (C23 keyword conflicts). If COMP-01 detects conflicts AND `SystemRequirements: USE_C17` is present, suppress or downgrade the COMP-01 finding. If COMP-01 detects conflicts AND no USE_C17, suggest either fixing the code or adding USE_C17 as a temporary workaround.
+- **Fix**: Best: Rename conflicting identifiers to avoid C23 keywords. Temporary: Add `USE_C17` to SystemRequirements in DESCRIPTION. Ensure configure script does not override the C standard selection.
+- **Files**: `DESCRIPTION`, `src/*.c`, `src/*.h`
+
+---
+
+## Category: Maintainer Email
+
+### EMAIL-01: Maintainer Email Must Not Be a Mailing List
+
+- **Severity**: REJECTION
+- **Rule**: The maintainer (cre) email must belong to a person, not a mailing list, team alias, or group address.
+- **CRAN says**: "The package's DESCRIPTION file must show both the name and email address of a single designated maintainer (a person, not a mailing list)."
+- **Detection**: Parse the cre person's email from Authors@R. Flag if: the local part contains list keywords (lists, devel, dev-team, team, group, announce, discuss, users); the address starts with info@, admin@, support@, contact@, help@, office@, team@; or the domain is a known mailing list provider (lists.r-forge.r-project.org, lists.sourceforge.net, googlegroups.com, groups.io).
+- **Fix**: Use a personal email address for the maintainer (cre) role. Team emails can go in a BugReports or Contact field.
+- **Files**: `DESCRIPTION`
+
+### EMAIL-02: Maintainer Must Have Email in Authors@R
+
+- **Severity**: REJECTION
+- **Rule**: The person with the cre role in Authors@R must have an email argument. Without it, R cannot derive the Maintainer field.
+- **CRAN says**: "The package's DESCRIPTION file must show both the name and email address of a single designated maintainer."
+- **Detection**: Parse Authors@R. Find the person() block with "cre" role. Verify it contains an `email =` argument.
+- **Fix**: Add email to the cre person: `person("First", "Last", email = "name@domain.com", role = c("aut", "cre"))`.
+- **Files**: `DESCRIPTION`
+
+### EMAIL-03: Email Should Not Be from a Disposable Domain
+
+- **Severity**: WARNING
+- **Rule**: The maintainer email should not come from a known disposable/temporary email provider. CRAN requires long-term reachability; disposable addresses expire within hours or days.
+- **CRAN says**: "Make sure this email address is likely to be around for a while and that it's not heavily filtered."
+- **Detection**: Check the email domain against a curated list of known disposable email providers (mailinator.com, guerrillamail.com, tempmail.com, yopmail.com, sharklasers.com, 10minutemail.com, trashmail.com, throwaway.email, etc.).
+- **Fix**: Use a permanent personal email address (Gmail, Outlook, ProtonMail, institutional, or custom domain).
+- **Files**: `DESCRIPTION`
+
+### EMAIL-04: Email Address Must Not Be a Placeholder
+
+- **Severity**: REJECTION
+- **Rule**: The maintainer email must be a real, deliverable address -- not a placeholder or example address from a template.
+- **CRAN says**: "a valid (RFC 2822) email address in angle brackets"
+- **Detection**: Validate the email address: must have exactly one @, non-empty local part, domain with at least one dot. Flag placeholder domains (example.com, example.org, example.net) and template patterns (your.email@, maintainer@email.com, first.last@example.com, user@domain.com). Flag addresses with spaces or missing components.
+- **Fix**: Replace the placeholder with a real, working email address.
+- **Files**: `DESCRIPTION`
+
+### EMAIL-05: Institutional Email Longevity Warning
+
+- **Severity**: NOTE
+- **Rule**: Institutional email addresses (.edu, .ac.uk, .edu.au, etc.) are valid but higher risk of becoming undeliverable when the maintainer changes institutions. This is the #1 cause of CRAN package archival.
+- **CRAN says**: "Too many people let their maintainer addresses run out of service." (Uwe Ligges, R-package-devel)
+- **Detection**: Flag emails from university/academic domains: .edu, .ac.uk, .ac.jp, .edu.au, .edu.cn, .uni-*.de, and similar academic TLD patterns.
+- **Fix**: Consider using a stable personal email (Gmail, ProtonMail, custom domain) alongside or instead of the institutional address. If using an institutional email, update all CRAN packages promptly when changing institutions.
+- **Files**: `DESCRIPTION`
+
+### EMAIL-06: Noreply/Automated Email Addresses Are Not Allowed
+
+- **Severity**: REJECTION
+- **Rule**: The maintainer email must be actively monitored and responsive. Noreply, bot, and automated addresses cannot receive CRAN team communications.
+- **CRAN says**: "That contact address must be kept up to date, and be usable for information mailed by the CRAN team without any form of filtering, confirmation."
+- **Detection**: Flag emails matching noreply patterns: noreply@, no-reply@, donotreply@, do-not-reply@, notifications@github.com, *@users.noreply.github.com, bot@, ci@, automation@.
+- **Fix**: Use a personal email address that you actively monitor and can respond to.
+- **Files**: `DESCRIPTION`
+
+---
+
+## Category: inst/ Directory
+
+### INST-01: Hidden Files in inst/
+
+- **Severity**: REJECTION
+- **Rule**: Hidden files and OS-generated metadata must not be included in `inst/`. R CMD check flags these during "checking for hidden files and directories." Common offenders: `.DS_Store` (macOS Finder), `.gitkeep` (git empty-directory placeholder), `Thumbs.db` (Windows Explorer thumbnails), `desktop.ini` (Windows folder settings), `.Rhistory`, `.RData`.
+- **CRAN says**: "Found the following hidden files and directories: inst/.DS_Store, inst/.gitkeep"
+- **Detection**: Recursively scan `inst/` for files whose name starts with `.` or matches known OS metadata patterns: `.DS_Store`, `.gitkeep`, `.gitignore`, `Thumbs.db`, `desktop.ini`, `.Rhistory`, `.RData`.
+- **Fix**: Delete hidden files from `inst/`. Add patterns to `.Rbuildignore` if they must exist at the project root level. Use `usethis::use_build_ignore()` for systematic exclusion.
+- **Files**: `inst/**`
+
+### INST-02: Deprecated CITATION Format (citEntry/personList)
+
+- **Severity**: WARNING
+- **Rule**: The `inst/CITATION` file must use modern `bibentry()` instead of the deprecated `citEntry()`. Similarly, `personList()` and `as.personList()` must be replaced with `c()` on person objects. `citHeader()` and `citFooter()` should be replaced with `header` and `footer` arguments to `bibentry()`. Since R 4.x these old-style functions generate NOTEs under `--as-cran` and CRAN reviewers increasingly reject packages using them.
+- **CRAN says**: "Package CITATION file contains call(s) to old-style citEntry(). Please use bibentry() instead." / "Package CITATION file contains call(s) to old-style personList() or as.personList(). Please use c() on person objects instead."
+- **Detection**: Read `inst/CITATION`. Search for `citEntry(`, `personList(`, `as.personList(`, `citHeader(`, `citFooter(` patterns.
+- **Fix**: Replace `citEntry()` with `bibentry()` (use `bibtype` instead of `entry`). Replace `personList()` / `as.personList()` with `c()`. Replace `citHeader("text")` / `citFooter("text")` with `header = "text"` / `footer = "text"` arguments to the first `bibentry()` call.
+- **Files**: `inst/CITATION`
+
+### INST-03: inst/doc Conflicts with Vignette Building
+
+- **Severity**: WARNING
+- **Rule**: When a package has vignette sources in `vignettes/`, the `inst/doc/` directory should not exist in the source tree. Since R 3.1.0, `R CMD build` populates `inst/doc/` automatically from `vignettes/`. Manually placed files in `inst/doc/` create mismatches between source vignettes and built output. Vignette source files (`.Rmd`, `.Rnw`) must never be placed directly in `inst/doc/`.
+- **CRAN says**: "inst/doc directory should not contain pre-built vignettes if vignettes/ directory exists" / "Package has a VignetteBuilder field but no prebuilt vignette index."
+- **Detection**: Check if `vignettes/` exists with `.Rmd`/`.Rnw` source files. If `inst/doc/` also exists with `.html`/`.pdf`/`.Rmd`/`.Rnw` files, flag the conflict. Also flag `.Rmd` or `.Rnw` source files directly in `inst/doc/`.
+- **Fix**: Delete `inst/doc/` from the source tree (it is regenerated by `R CMD build`). Move any vignette sources to `vignettes/`. Add `inst/doc` to `.gitignore` (but NOT to `.Rbuildignore`).
+- **Files**: `inst/doc/`, `vignettes/`
+
+### INST-04: Reserved Subdirectory Names and Embedded Packages in inst/
+
+- **Severity**: REJECTION
+- **Rule**: Contents of `inst/` are copied to the package installation root. Subdirectories of `inst/` must not use names reserved by R's package structure: `R`, `data`, `demo`, `exec`, `libs`, `man`, `help`, `html`, `Meta`. These would overwrite or conflict with R's standard directories during installation. Additionally, `inst/` must not contain embedded packages (subdirectories with their own DESCRIPTION file).
+- **CRAN says**: "inst/ subdirectories should not interfere with R's standard directories" / "Subdirectory 'inst/tinytest/testpkg' appears to contain a package"
+- **Detection**: List immediate subdirectories of `inst/` and flag any matching reserved names (case-sensitive). Recursively scan `inst/` for DESCRIPTION files indicating embedded packages.
+- **Fix**: Rename conflicting directories to non-reserved names. For test fixture mock packages, restructure tests to avoid embedding packages inside `inst/`.
+- **Files**: `inst/*/`
+
+### INST-05: Missing Copyright Attribution for Bundled Third-Party Code
+
+- **Severity**: WARNING
+- **Rule**: Packages that bundle third-party JavaScript, CSS, C/C++ libraries, or other external code in `inst/` must properly attribute the original authors. CRAN Repository Policy requires: "Where code is copied (or derived) from the work of others, care must be taken that any copyright/license statements are preserved and authorship is not misrepresented." Common locations: `inst/htmlwidgets/lib/`, `inst/www/`, `inst/include/`, `inst/js/`, `inst/css/`.
+- **CRAN says**: "Where copyrights are held by an entity other than the package authors, this should preferably be indicated via 'cph' roles in the 'Authors@R' field, or using a 'Copyright' field (if necessary referring to an inst/COPYRIGHTS file)."
+- **Detection**: Check for common third-party code directories under `inst/` (`htmlwidgets/`, `www/`, `include/`, `js/`, `css/`). If found, check for: (1) `inst/COPYRIGHTS` file, (2) `Copyright` field in DESCRIPTION, (3) `cph` roles in Authors@R beyond the package authors, (4) LICENSE/LICENCE files within the third-party directories.
+- **Fix**: Add copyright holders to Authors@R with `cph` role. Create `inst/COPYRIGHTS` file listing all bundled code and their licenses. Add `Copyright` field to DESCRIPTION referencing `inst/COPYRIGHTS`. Include LICENSE files alongside bundled code.
+- **Files**: `inst/htmlwidgets/`, `inst/www/`, `inst/include/`, `inst/js/`, `inst/css/`, `DESCRIPTION`, `inst/COPYRIGHTS`
+
+### INST-06: Large Files in inst/extdata
+
+- **Severity**: WARNING
+- **Rule**: CRAN imposes a 1MB per-subdirectory soft limit (any subdirectory exceeding 1MB triggers a NOTE in R CMD check "checking installed package size"). The `inst/extdata/` directory is a common location for example data and test fixtures. The overall package tarball should not exceed 5MB without special approval. This rule enhances existing SIZE-01 with per-subdirectory awareness.
+- **CRAN says**: "installed size is X.XMb, sub-directories of 1Mb or more: extdata X.XMb"
+- **Detection**: Calculate total size of each subdirectory under `inst/`. Flag any subdirectory exceeding 1MB. Flag individual files over 500KB. Identify potentially compressible files (uncompressed CSV, BMP images, uncompressed text).
+- **Fix**: Compress data files (use xz or bzip2 for CSV/text). Reduce image resolution. Move large datasets to a separate data package. Use `tools::R_user_dir()` for runtime-downloaded data (R >= 4.0). Consider hosting data externally with download-on-demand.
+- **Files**: `inst/extdata/`, `inst/*/`
