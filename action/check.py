@@ -704,6 +704,27 @@ ACADEMIC_DOMAIN_PATTERNS = [
 ]
 
 
+def _extract_email_from_person_block(block: str) -> str | None:
+    """Extract email from a person() block, handling both named and positional args.
+
+    R's person() signature: person(given, family, middle, email, role, comment, ...)
+    Email can appear as:
+      - Named:      email = "addr@domain"
+      - Positional:  person("First", "Last", , "addr@domain", role = ...)
+    """
+    # Try named argument first
+    email_match = re.search(r'email\s*=\s*["\']([^"\']+)["\']', block)
+    if email_match:
+        return email_match.group(1).strip()
+    # Fall back to any quoted string containing @ (positional email)
+    for m in re.finditer(r'["\']([^"\']+@[^"\']+)["\']', block):
+        candidate = m.group(1)
+        # Skip ORCID URLs and other non-email strings
+        if '/' not in candidate and ' ' not in candidate:
+            return candidate.strip()
+    return None
+
+
 def extract_cre_email(authors_r: str) -> str | None:
     """Extract the maintainer (cre) email from Authors@R field."""
     person_blocks = re.findall(
@@ -712,9 +733,9 @@ def extract_cre_email(authors_r: str) -> str | None:
     )
     for block in person_blocks:
         if '"cre"' in block or "'cre'" in block:
-            email_match = re.search(r'email\s*=\s*["\']([^"\']+)["\']', block)
-            if email_match:
-                return email_match.group(1).strip()
+            email = _extract_email_from_person_block(block)
+            if email:
+                return email
     return None
 
 
@@ -726,8 +747,8 @@ def _has_cre_without_email(authors_r: str) -> bool:
     )
     for block in person_blocks:
         if '"cre"' in block or "'cre'" in block:
-            email_match = re.search(r'email\s*=\s*["\']([^"\']+)["\']', block)
-            if not email_match:
+            email = _extract_email_from_person_block(block)
+            if not email:
                 return True
     return False
 
