@@ -38,9 +38,13 @@ cp "$SCRIPT_DIR/skills/cran-fix.md" "$TARGET/skills/"
 cp "$SCRIPT_DIR/skills/cran-respond.md" "$TARGET/skills/"
 cp "$SCRIPT_DIR/knowledge/cran-rules.md" "$TARGET/knowledge/"
 
-# Register skill trigger in skill-rules.json (if it exists and cran-audit isn't already there)
+# Register skill trigger in skill-rules.json (create if missing)
 RULES_FILE="$TARGET/skills/skill-rules.json"
-if [ -f "$RULES_FILE" ] && ! grep -q '"cran-audit"' "$RULES_FILE"; then
+if [ ! -f "$RULES_FILE" ]; then
+  echo '{"skills": {}}' > "$RULES_FILE"
+  echo "Created $RULES_FILE"
+fi
+if ! grep -q '"cran-audit"' "$RULES_FILE"; then
   echo "Registering cran-audit trigger in skill-rules.json..."
   # Use a temp file to inject the cran-audit entry
   python3 -c "
