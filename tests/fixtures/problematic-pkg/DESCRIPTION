@@ -1,0 +1,12 @@
+Package: badpkg
+Type: Package
+Title: a package for doing things in R
+Version: 0.1.0.9000
+Author: Bob Smith <bob@example.com>
+Maintainer: Bob Smith <bob@example.com>
+Description: This package does stuff.
+License: GPL-3 + file LICENSE
+LazyData: true
+Depends: R (>= 3.5.0), dplyr
+Imports: ggplot2
+Suggests: testthat

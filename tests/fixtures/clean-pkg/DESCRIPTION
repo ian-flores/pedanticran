@@ -1,0 +1,12 @@
+Package: cleanpkg
+Type: Package
+Title: A Clean Example Package for Testing
+Version: 0.1.0
+Authors@R: c(
+    person("Jane", "Doe", email = "jane.doe@gmail.com", role = c("aut", "cre", "cph"))
+    )
+Description: Provides utility functions for demonstration purposes.
+    This package serves as a minimal valid R package for testing.
+License: MIT + file LICENSE
+Encoding: UTF-8
+RoxygenNote: 7.3.1
