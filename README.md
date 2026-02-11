@@ -1,5 +1,7 @@
 # pedanticran
 
+[![Tests](https://github.com/ian-flores/pedanticran/actions/workflows/test.yml/badge.svg)](https://github.com/ian-flores/pedanticran/actions/workflows/test.yml)
+
 > **Warning**
 > This project is experimental. Rules may be incomplete, checks may have false positives, and the API may change without notice. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
 
