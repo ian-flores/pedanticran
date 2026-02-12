@@ -17,6 +17,10 @@ inputs:
     description: 'Fail the check on: error, warning, or note'
     required: false
     default: 'error'
+  online:
+    description: 'Enable checks requiring network access (URL validation, CRAN lookups, spell check)'
+    required: false
+    default: 'false'
 
 outputs:
   issues:
@@ -43,4 +47,9 @@ runs:
     - name: Run Pedantic CRAN checks
       id: check
       shell: bash
-      run: python "${{ github.action_path }}/check.py" --path "${{ inputs.path }}" --severity "${{ inputs.severity }}" --fail-on "${{ inputs.fail-on }}"
+      run: |
+        ONLINE_FLAG=""
+        if [ "${{ inputs.online }}" = "true" ]; then
+          ONLINE_FLAG="--online"
+        fi
+        python "${{ github.action_path }}/check.py" --path "${{ inputs.path }}" --severity "${{ inputs.severity }}" --fail-on "${{ inputs.fail-on }}" $ONLINE_FLAG

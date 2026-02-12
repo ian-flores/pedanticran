@@ -2240,8 +2240,8 @@ class TestSyntheticChecks:
         rule_ids = [f.rule_id for f in findings]
         assert "VIG-08" in rule_ids
 
-    def test_vig08_builder_in_suggests_not_imports(self, tmp_path):
-        """VIG-08: VignetteBuilder in Suggests but not Imports should be flagged."""
+    def test_vig08_builder_in_suggests_ok(self, tmp_path):
+        """VIG-08: VignetteBuilder in Suggests is standard practice, NOT flagged."""
         pkg = self._make_pkg(
             tmp_path,
             description_extra="VignetteBuilder: knitr\nSuggests: knitr, rmarkdown"
@@ -2257,8 +2257,8 @@ class TestSyntheticChecks:
         )
         desc = check.parse_description(pkg)
         findings = check.check_vignettes(pkg, desc)
-        rule_ids = [f.rule_id for f in findings]
-        assert "VIG-08" in rule_ids
+        vig08 = [f for f in findings if f.rule_id == "VIG-08"]
+        assert len(vig08) == 0
 
     def test_vig08_builder_in_imports_ok(self, tmp_path):
         """VIG-08: VignetteBuilder in Imports should NOT be flagged."""

@@ -101,11 +101,12 @@ Every rule includes the verbatim CRAN rejection text, so you know exactly what r
     path: '.'          # Path to R package (default: repo root)
     severity: 'warning' # Minimum severity to report: error, warning, note
     fail-on: 'error'    # Fail the check at this severity
+    online: 'true'      # Enable URL validation, CRAN lookups, spell check
 ```
 
 **Outputs:** `issues`, `errors`, `warnings`, `notes` — use in downstream steps.
 
-The checker is pure Python (stdlib only). No R, no compiled dependencies. Runs 65+ static analysis checks covering DESCRIPTION, R code, C/C++/Fortran, Makevars, configure scripts, documentation, encoding, vignettes, NAMESPACE, data, system requirements, maintainer email, and inst/ directory.
+The checker is pure Python (stdlib only). No R, no compiled dependencies. Covers all 141 rules across DESCRIPTION, R code, C/C++/Fortran, Makevars, configure scripts, documentation, encoding, vignettes, NAMESPACE, data, system requirements, maintainer email, and inst/ directory. Pass `--online` to also validate URLs, check spelling, and verify dependencies exist on CRAN.
 
 ## How `/cran-fix` works
 

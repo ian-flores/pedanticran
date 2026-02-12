@@ -1422,6 +1422,10 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                 continue
             if re.search(r'if\s*\(\s*requireNamespace\s*\(', line):
                 continue
+            # Skip if inside a string literal (quoted text)
+            stripped = line.strip()
+            if re.search(r'''['"].*\b(?:library|require)\s*\(.*['"]''', stripped):
+                continue
             findings.append(Finding(
                 rule_id="NS-08", severity="error",
                 title="library()/require() in package code",
@@ -2133,24 +2137,43 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
                 ))
 
     # DOC-08: Lost Braces in Rd Documentation
+    # Only flag \item{text}{desc} inside \itemize{} blocks.
+    # This syntax is CORRECT inside \arguments{} and \describe{}.
     for rd in rd_files:
         rel = str(rd.relative_to(path))
         try:
             text = rd.read_text(encoding="utf-8", errors="replace")
         except Exception:
             continue
-        for i, line in enumerate(text.splitlines(), 1):
-            # Detect \itemize{ \item{text}{desc} } — wrong pattern
-            # In \itemize, items should be \item text, not \item{text}{desc}
-            if r'\itemize' in text:
-                if re.search(r'\\item\{[^}]+\}\{', line):
-                    findings.append(Finding(
-                        rule_id="DOC-08", severity="warning",
-                        title="Lost braces: \\item{}{} inside \\itemize",
-                        message=f"\\itemize uses '\\item text', not '\\item{{text}}{{desc}}' (that's for \\describe): `{line.strip()[:80]}`",
-                        file=rel, line=i,
-                        cran_says="Lost braces in Rd parsing."
-                    ))
+        if r'\itemize' not in text:
+            continue
+        lines = text.splitlines()
+        in_itemize = 0
+        brace_stack = []
+        brace_depth = 0
+        for i, line in enumerate(lines, 1):
+            # Check for \itemize{ entry before processing braces on this line
+            if re.search(r'\\itemize\s*\{', line):
+                in_itemize += 1
+                brace_stack.append(brace_depth)
+            # Only flag when inside \itemize
+            if in_itemize > 0 and re.search(r'\\item\{[^}]+\}\{', line):
+                findings.append(Finding(
+                    rule_id="DOC-08", severity="warning",
+                    title="Lost braces: \\item{}{} inside \\itemize",
+                    message=f"\\itemize uses '\\item text', not '\\item{{text}}{{desc}}' (that's for \\describe): `{line.strip()[:80]}`",
+                    file=rel, line=i,
+                    cran_says="Lost braces in Rd parsing."
+                ))
+            # Track brace depth to detect \itemize{} block end
+            for ch in line:
+                if ch == '{':
+                    brace_depth += 1
+                elif ch == '}':
+                    brace_depth -= 1
+                    if brace_stack and brace_depth <= brace_stack[-1]:
+                        brace_stack.pop()
+                        in_itemize -= 1
 
     # DOC-09: HTML5 Rd Validation
     deprecated_html_tags = [
@@ -2944,32 +2967,8 @@ def check_vignettes(path: Path, desc: dict) -> list[Finding]:
                 file=str(path / "DESCRIPTION"),
                 cran_says="Package has 'vignettes' subdirectory but apparently no vignettes."
             ))
-        # Check if VignetteBuilder package is in Suggests but not Imports
-        imports_raw = desc.get("Imports", "")
-        imports_pkgs = set()
-        if imports_raw:
-            for entry in imports_raw.split(","):
-                p = entry.strip().split("(")[0].strip()
-                if p:
-                    imports_pkgs.add(p)
-        suggests_raw = desc.get("Suggests", "")
-        suggests_pkgs = set()
-        if suggests_raw:
-            for entry in suggests_raw.split(","):
-                p = entry.strip().split("(")[0].strip()
-                if p:
-                    suggests_pkgs.add(p)
-        for vb_entry in vb_entries:
-            if vb_entry == pkg_name:
-                continue  # Already flagged above
-            if vb_entry in suggests_pkgs and vb_entry not in imports_pkgs:
-                findings.append(Finding(
-                    rule_id="VIG-08", severity="warning",
-                    title=f"VignetteBuilder '{vb_entry}' is in Suggests, not Imports",
-                    message=f"'{vb_entry}' is listed as VignetteBuilder but only in Suggests. Move to Imports to ensure availability during vignette building.",
-                    file=str(path / "DESCRIPTION"),
-                    cran_says="Package has 'vignettes' subdirectory but apparently no vignettes."
-                ))
+        # Note: VignetteBuilder in Suggests (not Imports) is standard R practice
+        # per Writing R Extensions. Do not flag this.
 
     # VIG-06: Vignette Data Files in Wrong Location (heuristic)
     _data_read_patterns = [
