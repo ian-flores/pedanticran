@@ -2,8 +2,8 @@
 
 [![Tests](https://github.com/ian-flores/pedanticran/actions/workflows/test.yml/badge.svg)](https://github.com/ian-flores/pedanticran/actions/workflows/test.yml)
 
-> **Warning**
-> This project is experimental. Rules may be incomplete, checks may have false positives, and the API may change without notice. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
+> **Beta**
+> This project is in beta. Checks may have false positives and the API may change. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
 
 **pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 141 CRAN rules (compiled from a decade of mailing list rejections, 2015–2025) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
 
