@@ -1164,6 +1164,1122 @@ class TestSyntheticChecks:
         rule_ids = [f.rule_id for f in findings]
         assert "COMP-05" in rule_ids
 
+    # --- CODE-07: Clean up temporary files ---
+
+    def test_code07_tempfile_no_cleanup(self, tmp_path):
+        """CODE-07: tempfile() without unlink/on.exit should be flagged."""
+        r_code = (
+            "process_data <- function(x) {\n"
+            "    tmp <- tempfile()\n"
+            "    writeLines(x, tmp)\n"
+            "    readLines(tmp)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-07" in rule_ids
+
+    def test_code07_tempfile_with_unlink_ok(self, tmp_path):
+        """CODE-07: tempfile() with unlink() should NOT be flagged."""
+        r_code = (
+            "process_data <- function(x) {\n"
+            "    tmp <- tempfile()\n"
+            "    writeLines(x, tmp)\n"
+            "    result <- readLines(tmp)\n"
+            "    unlink(tmp)\n"
+            "    result\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        code07 = [f for f in findings if f.rule_id == "CODE-07"]
+        assert len(code07) == 0
+
+    def test_code07_tempfile_with_on_exit_ok(self, tmp_path):
+        """CODE-07: tempfile() with on.exit() should NOT be flagged."""
+        r_code = (
+            "process_data <- function(x) {\n"
+            "    tmp <- tempfile()\n"
+            "    on.exit(unlink(tmp), add = TRUE)\n"
+            "    writeLines(x, tmp)\n"
+            "    readLines(tmp)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        code07 = [f for f in findings if f.rule_id == "CODE-07"]
+        assert len(code07) == 0
+
+    def test_code07_tempdir_no_cleanup(self, tmp_path):
+        """CODE-07: tempdir() without cleanup should be flagged."""
+        r_code = (
+            "save_output <- function(x) {\n"
+            "    dir <- tempdir()\n"
+            "    writeLines(x, file.path(dir, 'out.txt'))\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-07" in rule_ids
+
+    # --- CODE-10: Maximum 2 cores ---
+
+    def test_code10_detectCores_uncapped(self, tmp_path):
+        """CODE-10: detectCores() without min(..., 2) should be flagged."""
+        r_code = (
+            "run_parallel <- function(x) {\n"
+            "    ncores <- parallel::detectCores()\n"
+            "    parallel::mclapply(x, identity, mc.cores = ncores)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-10" in rule_ids
+
+    def test_code10_detectCores_capped_ok(self, tmp_path):
+        """CODE-10: detectCores() with min(..., 2) should NOT be flagged."""
+        r_code = (
+            "run_parallel <- function(x) {\n"
+            "    ncores <- min(parallel::detectCores(), 2)\n"
+            "    parallel::mclapply(x, identity, mc.cores = ncores)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        code10 = [f for f in findings if f.rule_id == "CODE-10"]
+        assert len(code10) == 0
+
+    def test_code10_mc_cores_option_ok(self, tmp_path):
+        """CODE-10: getOption('mc.cores') should NOT be flagged."""
+        r_code = (
+            "run_parallel <- function(x) {\n"
+            "    ncores <- getOption('mc.cores', 2L)\n"
+            "    parallel::mclapply(x, identity, mc.cores = ncores)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        code10 = [f for f in findings if f.rule_id == "CODE-10"]
+        assert len(code10) == 0
+
+    def test_code10_omp_num_threads(self, tmp_path):
+        """CODE-10: Setting OMP_NUM_THREADS should be flagged."""
+        r_code = (
+            "setup <- function() {\n"
+            '    Sys.setenv("OMP_NUM_THREADS" = 4)\n'
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-10" in rule_ids
+
+    # --- CODE-14: No disabling SSL/TLS verification ---
+
+    def test_code14_ssl_verifypeer_false(self, tmp_path):
+        """CODE-14: ssl_verifypeer = FALSE should be flagged."""
+        r_code = (
+            "fetch_data <- function(url) {\n"
+            "    httr::GET(url, httr::config(ssl_verifypeer = FALSE))\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-14" in rule_ids
+
+    def test_code14_ssl_verifypeer_zero(self, tmp_path):
+        """CODE-14: ssl_verifypeer = 0 should be flagged."""
+        r_code = (
+            "fetch_data <- function(url) {\n"
+            "    httr::GET(url, httr::config(ssl_verifypeer = 0))\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-14" in rule_ids
+
+    def test_code14_ssl_verifypeer_true_ok(self, tmp_path):
+        """CODE-14: ssl_verifypeer = TRUE should NOT be flagged."""
+        r_code = (
+            "fetch_data <- function(url) {\n"
+            "    httr::GET(url, httr::config(ssl_verifypeer = TRUE))\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        code14 = [f for f in findings if f.rule_id == "CODE-14"]
+        assert len(code14) == 0
+
+    # --- CODE-17: UseLTO causes CPU time NOTE ---
+
+    def test_code17_uselto(self, tmp_path):
+        """CODE-17: UseLTO in DESCRIPTION should be flagged."""
+        pkg = self._make_pkg(tmp_path, description_extra="UseLTO: yes")
+        desc = check.parse_description(pkg)
+        findings = check.check_description_fields(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-17" in rule_ids
+
+    def test_code17_no_uselto_ok(self, tmp_path):
+        """CODE-17: No UseLTO should NOT produce CODE-17 finding."""
+        pkg = self._make_pkg(tmp_path)
+        desc = check.parse_description(pkg)
+        findings = check.check_description_fields(pkg, desc)
+        code17 = [f for f in findings if f.rule_id == "CODE-17"]
+        assert len(code17) == 0
+
+    # --- CODE-21: class(matrix()) returns two-element vector ---
+
+    def test_code21_class_eq_matrix(self, tmp_path):
+        """CODE-21: class(x) == 'matrix' should be flagged."""
+        r_code = (
+            "check_type <- function(x) {\n"
+            '    if (class(x) == "matrix") return(TRUE)\n'
+            "    FALSE\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-21" in rule_ids
+
+    def test_code21_class_eq_data_frame(self, tmp_path):
+        """CODE-21: class(x) == 'data.frame' should be flagged."""
+        r_code = (
+            "check_type <- function(x) {\n"
+            '    if (class(x) == "data.frame") return(TRUE)\n'
+            "    FALSE\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-21" in rule_ids
+
+    def test_code21_inherits_ok(self, tmp_path):
+        """CODE-21: inherits(x, 'matrix') should NOT be flagged."""
+        r_code = (
+            "check_type <- function(x) {\n"
+            '    if (inherits(x, "matrix")) return(TRUE)\n'
+            "    FALSE\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        code21 = [f for f in findings if f.rule_id == "CODE-21"]
+        assert len(code21) == 0
+
+    # --- CODE-22: if()/while() condition length > 1 ---
+
+    def test_code22_if_class(self, tmp_path):
+        """CODE-22: if(class(x) == ...) should be flagged."""
+        r_code = (
+            "check_type <- function(x) {\n"
+            '    if (class(x) == "numeric") {\n'
+            "        return(TRUE)\n"
+            "    }\n"
+            "    FALSE\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-22" in rule_ids
+
+    def test_code22_if_inherits_ok(self, tmp_path):
+        """CODE-22: if(inherits(x, ...)) should NOT be flagged."""
+        r_code = (
+            "check_type <- function(x) {\n"
+            '    if (inherits(x, "numeric")) {\n'
+            "        return(TRUE)\n"
+            "    }\n"
+            "    FALSE\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        code22 = [f for f in findings if f.rule_id == "CODE-22"]
+        assert len(code22) == 0
+
+    # --- CODE-19: Staged installation compatibility ---
+
+    def test_code19_top_level_system_file(self, tmp_path):
+        """CODE-19: Top-level system.file() assignment should be flagged."""
+        r_code = (
+            "DB_PATH <- system.file('extdata', 'db.sqlite', package = 'testpkg')\n"
+            "\n"
+            "get_data <- function() {\n"
+            "    readLines(DB_PATH)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "CODE-19" in rule_ids
+
+    def test_code19_system_file_in_function_ok(self, tmp_path):
+        """CODE-19: system.file() inside a function should NOT be flagged."""
+        r_code = (
+            "get_db_path <- function() {\n"
+            "    system.file('extdata', 'db.sqlite', package = 'testpkg')\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        code19 = [f for f in findings if f.rule_id == "CODE-19"]
+        assert len(code19) == 0
+
+    # --- NS-08: No library()/require() in package code ---
+
+    def test_ns08_library_in_code(self, tmp_path):
+        """NS-08: library() in package code should be flagged."""
+        r_code = (
+            "do_stuff <- function() {\n"
+            "    library(dplyr)\n"
+            "    mtcars %>% filter(mpg > 20)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "NS-08" in rule_ids
+
+    def test_ns08_require_in_code(self, tmp_path):
+        """NS-08: require() in package code should be flagged."""
+        r_code = (
+            "do_stuff <- function() {\n"
+            "    require(ggplot2)\n"
+            "    ggplot(mtcars, aes(x = mpg))\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "NS-08" in rule_ids
+
+    def test_ns08_requireNamespace_ok(self, tmp_path):
+        """NS-08: requireNamespace() should NOT be flagged."""
+        r_code = (
+            "do_stuff <- function() {\n"
+            '    if (requireNamespace("dplyr", quietly = TRUE)) {\n'
+            "        dplyr::filter(mtcars, mpg > 20)\n"
+            "    }\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        ns08 = [f for f in findings if f.rule_id == "NS-08"]
+        assert len(ns08) == 0
+
+    def test_ns08_library_in_comment_ok(self, tmp_path):
+        """NS-08: library() in a comment should NOT be flagged."""
+        r_code = (
+            "# library(dplyr) -- not actually loaded\n"
+            "do_stuff <- function() {\n"
+            "    dplyr::filter(mtcars, mpg > 20)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        ns08 = [f for f in findings if f.rule_id == "NS-08"]
+        assert len(ns08) == 0
+
+    def test_ns08_library_in_interactive_ok(self, tmp_path):
+        """NS-08: library() inside if(interactive()) should NOT be flagged."""
+        r_code = (
+            "setup <- function() {\n"
+            "    if (interactive()) library(devtools)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        ns08 = [f for f in findings if f.rule_id == "NS-08"]
+        assert len(ns08) == 0
+
+    # --- COMP-01: C23 keyword conflicts ---
+
+    def test_comp01_define_bool(self, tmp_path):
+        """COMP-01: #define bool should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "#define bool int\n"
+            "void my_func(void) { }\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-01" in rule_ids
+
+    def test_comp01_define_true(self, tmp_path):
+        """COMP-01: #define true should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "#define true 1\n"
+            "#define false 0\n"
+            "void my_func(void) { }\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-01" in rule_ids
+
+    def test_comp01_typedef_bool(self, tmp_path):
+        """COMP-01: typedef ... bool should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "types.h").write_text(
+            "#ifndef TYPES_H\n"
+            "#define TYPES_H\n"
+            "typedef int bool;\n"
+            "#endif\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-01" in rule_ids
+
+    def test_comp01_stdbool_include_ok(self, tmp_path):
+        """COMP-01: Using stdbool.h should NOT be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "#include <stdbool.h>\n"
+            "bool my_flag = true;\n"
+            "void my_func(void) { }\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        comp01 = [f for f in findings if f.rule_id == "COMP-01"]
+        assert len(comp01) == 0
+
+    # --- COMP-03: Non-API entry points ---
+
+    def test_comp03_dataptr(self, tmp_path):
+        """COMP-03: DATAPTR should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "#include <Rinternals.h>\n"
+            "SEXP get_data(SEXP x) {\n"
+            "    double *ptr = DATAPTR(x);\n"
+            "    return R_NilValue;\n"
+            "}\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-03" in rule_ids
+
+    def test_comp03_set_typeof(self, tmp_path):
+        """COMP-03: SET_TYPEOF should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "#include <Rinternals.h>\n"
+            "void change_type(SEXP x) {\n"
+            "    SET_TYPEOF(x, INTSXP);\n"
+            "}\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-03" in rule_ids
+
+    # --- COMP-09: Rust package requirements ---
+
+    def test_comp09_cargo_no_vendor(self, tmp_path):
+        """COMP-09: Cargo.toml without vendor/ should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Cargo.toml").write_text("[package]\nname = 'test'\n")
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-09" in rule_ids
+
+    def test_comp09_cargo_no_configure(self, tmp_path):
+        """COMP-09: Cargo.toml without configure script should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Cargo.toml").write_text("[package]\nname = 'test'\n")
+        (pkg / "src" / "vendor").mkdir()
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        comp09 = [f for f in findings if f.rule_id == "COMP-09"]
+        # Should flag missing configure
+        assert any("configure" in f.message for f in comp09)
+
+    def test_comp09_cargo_complete_ok(self, tmp_path):
+        """COMP-09: Cargo.toml with vendor/ and configure should NOT be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Cargo.toml").write_text("[package]\nname = 'test'\n")
+        (pkg / "src" / "vendor").mkdir()
+        (pkg / "configure").write_text("#!/bin/sh\nrustc --version\n")
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        comp09 = [f for f in findings if f.rule_id == "COMP-09"]
+        assert len(comp09) == 0
+
+    # --- COMP-10: Native routine registration ---
+
+    def test_comp10_missing_registration(self, tmp_path):
+        """COMP-10: .Call() without init.c should be flagged."""
+        r_code = (
+            "compute <- function(x) {\n"
+            '    .Call("C_compute", x)\n'
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code, namespace_content="export(compute)\n")
+        (pkg / "src").mkdir()
+        (pkg / "src" / "compute.c").write_text(
+            "#include <R.h>\n"
+            "#include <Rinternals.h>\n"
+            "SEXP C_compute(SEXP x) { return x; }\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-10" in rule_ids
+
+    def test_comp10_with_registration_ok(self, tmp_path):
+        """COMP-10: .Call() with proper init.c should NOT be flagged for missing registration."""
+        r_code = (
+            "compute <- function(x) {\n"
+            '    .Call("C_compute", x)\n'
+            "}\n"
+        )
+        pkg = self._make_pkg(
+            tmp_path, r_code=r_code,
+            namespace_content="export(compute)\nuseDynLib(testpkg, .registration = TRUE)\n"
+        )
+        (pkg / "src").mkdir()
+        (pkg / "src" / "compute.c").write_text(
+            "#include <R.h>\n"
+            "#include <Rinternals.h>\n"
+            "SEXP C_compute(SEXP x) { return x; }\n"
+        )
+        (pkg / "src" / "init.c").write_text(
+            "#include <R.h>\n"
+            "#include <R_ext/Rdynload.h>\n"
+            "void R_init_testpkg(DllInfo *dll) {\n"
+            "    R_registerRoutines(dll, NULL, NULL, NULL, NULL);\n"
+            "    R_useDynamicSymbols(dll, FALSE);\n"
+            "}\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        comp10 = [f for f in findings if f.rule_id == "COMP-10"]
+        assert len(comp10) == 0
+
+    # --- COMP-12: UCRT Windows toolchain ---
+
+    def test_comp12_mingw_prefix(self, tmp_path):
+        """COMP-12: $(MINGW_PREFIX) in Makevars.win should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Makevars.win").write_text(
+            "PKG_LIBS = -L$(MINGW_PREFIX)/lib -lfoo\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-12" in rule_ids
+
+    def test_comp12_download_file(self, tmp_path):
+        """COMP-12: download.file in configure.win should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "configure.win").write_text(
+            "#!/bin/sh\n"
+            "download.file('https://example.com/lib.dll', 'src/lib.dll')\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "COMP-12" in rule_ids
+
+    def test_comp12_clean_makevars_win_ok(self, tmp_path):
+        """COMP-12: Clean Makevars.win should NOT produce COMP-12 findings."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Makevars.win").write_text(
+            "PKG_LIBS = -lfoo\n"
+            "PKG_CFLAGS = -Wall\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        comp12 = [f for f in findings if f.rule_id == "COMP-12"]
+        assert len(comp12) == 0
+
+    # --- DOC-07: Use Canonical CRAN/Bioconductor URLs ---
+
+    def test_doc07_non_canonical_cran_url(self, tmp_path):
+        """DOC-07: Non-canonical CRAN URL should be flagged."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{See http://cran.r-project.org/web/packages/foo/index.html}\n"
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DOC-07" in rule_ids
+
+    def test_doc07_canonical_cran_url_ok(self, tmp_path):
+        """DOC-07: Canonical CRAN URL should NOT be flagged."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{See https://CRAN.R-project.org/package=foo}\n"
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        doc07 = [f for f in findings if f.rule_id == "DOC-07"]
+        assert len(doc07) == 0
+
+    def test_doc07_non_canonical_bioc_url(self, tmp_path):
+        """DOC-07: Non-canonical Bioconductor URL should be flagged."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{See http://www.bioconductor.org/packages/foo}\n"
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DOC-07" in rule_ids
+
+    # --- DOC-08: Lost Braces in Rd Documentation ---
+
+    def test_doc08_itemize_with_brace_items(self, tmp_path):
+        """DOC-08: \\item{}{} inside \\itemize should be flagged."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{A test.}\n"
+            "\\details{\n"
+            "\\itemize{\n"
+            "  \\item{first}{This is the first item}\n"
+            "  \\item{second}{This is the second item}\n"
+            "}\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DOC-08" in rule_ids
+
+    def test_doc08_describe_with_brace_items_ok(self, tmp_path):
+        """DOC-08: \\item{}{} inside \\describe is correct and should NOT be flagged."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{A test.}\n"
+            "\\details{\n"
+            "\\describe{\n"
+            "  \\item{first}{This is the first item}\n"
+            "  \\item{second}{This is the second item}\n"
+            "}\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        doc08 = [f for f in findings if f.rule_id == "DOC-08"]
+        assert len(doc08) == 0
+
+    # --- DOC-09: HTML5 Rd Validation ---
+
+    def test_doc09_deprecated_html_font(self, tmp_path):
+        """DOC-09: <font> tag in \\out{} block should be flagged."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{A test.}\n"
+            '\\if{html}{\\out{<font color="red">Warning</font>}}\n'
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DOC-09" in rule_ids
+
+    def test_doc09_html5_ok(self, tmp_path):
+        """DOC-09: Modern HTML5 elements should NOT be flagged."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{A test.}\n"
+            '\\if{html}{\\out{<span style="color:red">Warning</span>}}\n'
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        doc09 = [f for f in findings if f.rule_id == "DOC-09"]
+        assert len(doc09) == 0
+
+    # --- DOC-10: \\donttest Examples Now Executed Under --as-cran ---
+
+    def test_doc10_donttest_in_rd(self, tmp_path):
+        """DOC-10: \\donttest{} in Rd should produce a NOTE."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{A test.}\n"
+            "\\examples{\n"
+            "\\donttest{\n"
+            "  slow_computation()\n"
+            "}\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DOC-10" in rule_ids
+
+    def test_doc10_no_donttest_ok(self, tmp_path):
+        """DOC-10: No \\donttest{} should NOT produce DOC-10."""
+        rd_content = (
+            "\\name{test}\n"
+            "\\alias{test}\n"
+            "\\title{Test}\n"
+            "\\description{A test.}\n"
+            "\\examples{\n"
+            "  test()\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, rd_content=rd_content, description_extra="RoxygenNote: 7.3.1")
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        doc10 = [f for f in findings if f.rule_id == "DOC-10"]
+        assert len(doc10) == 0
+
+    # --- DOC-11: Duplicated Vignette Titles ---
+
+    def test_doc11_duplicate_vignette_titles(self, tmp_path):
+        """DOC-11: Duplicate vignette titles should be flagged."""
+        pkg = self._make_pkg(tmp_path, description_extra="VignetteBuilder: knitr\nSuggests: knitr, rmarkdown")
+        (pkg / "vignettes").mkdir()
+        for name in ("vig1.Rmd", "vig2.Rmd"):
+            (pkg / "vignettes" / name).write_text(
+                "---\ntitle: My Vignette\n---\n"
+                "<!--\n"
+                "%\\VignetteEngine{knitr::rmarkdown}\n"
+                "%\\VignetteIndexEntry{My Vignette}\n"
+                "%\\VignetteEncoding{UTF-8}\n"
+                "-->\n"
+                "Hello world.\n"
+            )
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DOC-11" in rule_ids
+
+    def test_doc11_unique_vignette_titles_ok(self, tmp_path):
+        """DOC-11: Unique vignette titles should NOT be flagged."""
+        pkg = self._make_pkg(tmp_path, description_extra="VignetteBuilder: knitr\nSuggests: knitr, rmarkdown")
+        (pkg / "vignettes").mkdir()
+        for i, name in enumerate(("vig1.Rmd", "vig2.Rmd")):
+            (pkg / "vignettes" / name).write_text(
+                f"---\ntitle: Vignette {i}\n---\n"
+                "<!--\n"
+                "%\\VignetteEngine{knitr::rmarkdown}\n"
+                f"%\\VignetteIndexEntry{{Vignette {i}}}\n"
+                "%\\VignetteEncoding{UTF-8}\n"
+                "-->\n"
+                "Hello world.\n"
+            )
+        desc = check.parse_description(pkg)
+        findings = check.check_documentation(pkg, desc)
+        doc11 = [f for f in findings if f.rule_id == "DOC-11"]
+        assert len(doc11) == 0
+
+    # --- NS-07: Re-Export Documentation ---
+
+    def test_ns07_undocumented_reexport(self, tmp_path):
+        """NS-07: Re-exported function without documentation should be flagged."""
+        pkg = self._make_pkg(
+            tmp_path,
+            namespace_content="importFrom(magrittr, \"%>%\")\nexport(\"%>%\")\nexport(test_fn)\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_namespace(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "NS-07" in rule_ids
+
+    def test_ns07_documented_reexport_ok(self, tmp_path):
+        """NS-07: Re-exported function WITH documentation should NOT be flagged."""
+        pkg = self._make_pkg(
+            tmp_path,
+            namespace_content="importFrom(magrittr, \"%>%\")\nexport(\"%>%\")\nexport(test_fn)\n"
+        )
+        # Create documentation for the re-export
+        rd_content = (
+            "\\name{\\%>\\%}\n"
+            "\\alias{\\%>\\%}\n"
+            "\\title{Pipe operator}\n"
+            "\\description{See magrittr}\n"
+            "\\value{Result of piped expression.}\n"
+        )
+        (pkg / "man" / "reexports.Rd").write_text(rd_content)
+        desc = check.parse_description(pkg)
+        findings = check.check_namespace(pkg, desc)
+        ns07 = [f for f in findings if f.rule_id == "NS-07"]
+        assert len(ns07) == 0
+
+    # --- DEP-02: Suggested Packages Must Be Used Conditionally ---
+
+    def test_dep02_unconditional_library(self, tmp_path):
+        """DEP-02: library(suggested_pkg) without conditional should be flagged."""
+        r_code = (
+            "do_analysis <- function(x) {\n"
+            "    library(ggplot2)\n"
+            "    ggplot(x, aes(x = val)) + geom_histogram()\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code, description_extra="Suggests: ggplot2")
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DEP-02" in rule_ids
+
+    def test_dep02_conditional_require_ok(self, tmp_path):
+        """DEP-02: require() inside if() should NOT be flagged as DEP-02."""
+        r_code = (
+            "do_analysis <- function(x) {\n"
+            "    if (require(ggplot2)) {\n"
+            "        ggplot(x, aes(x = val)) + geom_histogram()\n"
+            "    }\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code, description_extra="Suggests: ggplot2")
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        dep02 = [f for f in findings if f.rule_id == "DEP-02"]
+        assert len(dep02) == 0
+
+    def test_dep02_requireNamespace_ok(self, tmp_path):
+        """DEP-02: requireNamespace() should NOT be flagged as DEP-02."""
+        r_code = (
+            "do_analysis <- function(x) {\n"
+            "    if (requireNamespace(\"ggplot2\", quietly = TRUE)) {\n"
+            "        ggplot2::ggplot(x, ggplot2::aes(x = val)) + ggplot2::geom_histogram()\n"
+            "    }\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code, description_extra="Suggests: ggplot2")
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        dep02 = [f for f in findings if f.rule_id == "DEP-02"]
+        assert len(dep02) == 0
+
+    def test_dep02_imports_pkg_not_flagged(self, tmp_path):
+        """DEP-02: library() for a non-Suggests package should NOT be flagged as DEP-02."""
+        r_code = (
+            "do_stuff <- function() {\n"
+            "    library(dplyr)\n"
+            "    mtcars %>% filter(mpg > 20)\n"
+            "}\n"
+        )
+        # dplyr is NOT in Suggests, so DEP-02 should not fire (NS-08 might though)
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        dep02 = [f for f in findings if f.rule_id == "DEP-02"]
+        assert len(dep02) == 0
+
+    # --- NET-01: Must Fail Gracefully When Resources Unavailable ---
+
+    def test_net01_bare_download_file(self, tmp_path):
+        """NET-01: download.file() without error handling should be flagged."""
+        r_code = (
+            "get_data <- function(url) {\n"
+            "    tmp <- tempfile()\n"
+            "    download.file(url, tmp)\n"
+            "    readLines(tmp)\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "NET-01" in rule_ids
+
+    def test_net01_with_trycatch_ok(self, tmp_path):
+        """NET-01: download.file() with tryCatch should NOT be flagged."""
+        r_code = (
+            "get_data <- function(url) {\n"
+            "    tmp <- tempfile()\n"
+            "    tryCatch(\n"
+            "        download.file(url, tmp),\n"
+            "        error = function(e) NULL\n"
+            "    )\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        net01 = [f for f in findings if f.rule_id == "NET-01"]
+        assert len(net01) == 0
+
+    def test_net01_with_try_ok(self, tmp_path):
+        """NET-01: httr::GET() with try() should NOT be flagged."""
+        r_code = (
+            "get_data <- function(url) {\n"
+            "    result <- try(httr::GET(url), silent = TRUE)\n"
+            "    if (inherits(result, 'try-error')) return(NULL)\n"
+            "    result\n"
+            "}\n"
+        )
+        pkg = self._make_pkg(tmp_path, r_code=r_code)
+        desc = check.parse_description(pkg)
+        findings = check.check_code(pkg, desc)
+        net01 = [f for f in findings if f.rule_id == "NET-01"]
+        assert len(net01) == 0
+
+    # --- DATA-07: Serialization Version Incompatibility ---
+
+    def test_data07_v3_no_r_constraint(self, tmp_path):
+        """DATA-07: RDX3 data without R version constraint should be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "data").mkdir()
+        # Write a file that starts with RDX3 magic
+        (pkg / "data" / "mydata.rda").write_bytes(b"RDX3\x00\x00\x00" + b"\x00" * 50)
+        desc = check.parse_description(pkg)
+        findings = check.check_data(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DATA-07" in rule_ids
+
+    def test_data07_v3_with_r35_ok(self, tmp_path):
+        """DATA-07: RDX3 data with R >= 3.5.0 should NOT be flagged."""
+        pkg = self._make_pkg(tmp_path, description_extra="Depends: R (>= 3.5.0)")
+        (pkg / "data").mkdir()
+        (pkg / "data" / "mydata.rda").write_bytes(b"RDX3\x00\x00\x00" + b"\x00" * 50)
+        desc = check.parse_description(pkg)
+        findings = check.check_data(pkg, desc)
+        data07 = [f for f in findings if f.rule_id == "DATA-07"]
+        assert len(data07) == 0
+
+    def test_data07_v3_with_old_r_version(self, tmp_path):
+        """DATA-07: RDX3 data with R >= 3.4.0 should be flagged."""
+        pkg = self._make_pkg(tmp_path, description_extra="Depends: R (>= 3.4.0)")
+        (pkg / "data").mkdir()
+        (pkg / "data" / "mydata.rda").write_bytes(b"RDX3\x00\x00\x00" + b"\x00" * 50)
+        desc = check.parse_description(pkg)
+        findings = check.check_data(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "DATA-07" in rule_ids
+
+    def test_data07_v2_ok(self, tmp_path):
+        """DATA-07: Non-v3 data should NOT be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "data").mkdir()
+        # Write a file with RDX2 magic (serialization v2)
+        (pkg / "data" / "mydata.rda").write_bytes(b"RDX2\x00\x00\x00" + b"\x00" * 50)
+        desc = check.parse_description(pkg)
+        findings = check.check_data(pkg, desc)
+        data07 = [f for f in findings if f.rule_id == "DATA-07"]
+        assert len(data07) == 0
+
+    # --- SYS-03: C++20 Default Standard Transition ---
+
+    def test_sys03_cxx17_explicit(self, tmp_path):
+        """SYS-03: CXX_STD = CXX17 should produce an informational NOTE."""
+        pkg = self._make_pkg(tmp_path, description_extra="SystemRequirements: C++17")
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Makevars").write_text("CXX_STD = CXX17\n")
+        (pkg / "src" / "code.cpp").write_text("// C++ code\n")
+        desc = check.parse_description(pkg)
+        findings = check.check_system_requirements(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "SYS-03" in rule_ids
+
+    def test_sys03_cxx11_deprecated(self, tmp_path):
+        """SYS-03: CXX_STD = CXX11 should be flagged as deprecated."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Makevars").write_text("CXX_STD = CXX11\n")
+        (pkg / "src" / "code.cpp").write_text("// C++ code\n")
+        desc = check.parse_description(pkg)
+        findings = check.check_system_requirements(pkg, desc)
+        sys03 = [f for f in findings if f.rule_id == "SYS-03"]
+        assert len(sys03) >= 1
+        assert any("deprecated" in f.message.lower() or "C++11" in f.message for f in sys03)
+
+    def test_sys03_no_cxx_std_ok(self, tmp_path):
+        """SYS-03: No CXX_STD should NOT produce SYS-03 finding."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Makevars").write_text("PKG_CFLAGS = -Wall\n")
+        (pkg / "src" / "code.cpp").write_text("// C++ code\n")
+        desc = check.parse_description(pkg)
+        findings = check.check_system_requirements(pkg, desc)
+        sys03 = [f for f in findings if f.rule_id == "SYS-03"]
+        assert len(sys03) == 0
+
+    # --- SYS-04: Configure Script Missing for System Libraries ---
+
+    def test_sys04_missing_configure(self, tmp_path):
+        """SYS-04: Compiled code with SystemRequirements but no configure should be flagged."""
+        pkg = self._make_pkg(tmp_path, description_extra="SystemRequirements: libcurl")
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "void my_func(void) { }\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_system_requirements(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "SYS-04" in rule_ids
+
+    def test_sys04_with_configure_ok(self, tmp_path):
+        """SYS-04: Compiled code with configure should NOT be flagged."""
+        pkg = self._make_pkg(tmp_path, description_extra="SystemRequirements: libcurl")
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "void my_func(void) { }\n"
+        )
+        (pkg / "configure").write_text("#!/bin/sh\necho 'checking libcurl...'\n")
+        desc = check.parse_description(pkg)
+        findings = check.check_system_requirements(pkg, desc)
+        sys04 = [f for f in findings if f.rule_id == "SYS-04"]
+        assert len(sys04) == 0
+
+    def test_sys04_with_configure_ac_ok(self, tmp_path):
+        """SYS-04: configure.ac should count as having a configure script."""
+        pkg = self._make_pkg(tmp_path, description_extra="SystemRequirements: libcurl")
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "void my_func(void) { }\n"
+        )
+        (pkg / "configure.ac").write_text("AC_INIT\n")
+        desc = check.parse_description(pkg)
+        findings = check.check_system_requirements(pkg, desc)
+        sys04 = [f for f in findings if f.rule_id == "SYS-04"]
+        assert len(sys04) == 0
+
+    def test_sys04_no_sysreqs_ok(self, tmp_path):
+        """SYS-04: Compiled code without SystemRequirements should NOT be flagged."""
+        pkg = self._make_pkg(tmp_path)
+        (pkg / "src").mkdir()
+        (pkg / "src" / "code.c").write_text(
+            "#include <R.h>\n"
+            "void my_func(void) { }\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_system_requirements(pkg, desc)
+        sys04 = [f for f in findings if f.rule_id == "SYS-04"]
+        assert len(sys04) == 0
+
+    # --- VIG-08: Custom Vignette Engine Bootstrap ---
+
+    def test_vig08_self_referencing_builder(self, tmp_path):
+        """VIG-08: VignetteBuilder listing the package itself should be flagged."""
+        pkg = self._make_pkg(tmp_path, description_extra="VignetteBuilder: testpkg")
+        (pkg / "vignettes").mkdir()
+        (pkg / "vignettes" / "intro.Rmd").write_text(
+            "---\ntitle: Intro\n---\n"
+            "<!--\n"
+            "%\\VignetteEngine{testpkg::custom}\n"
+            "%\\VignetteIndexEntry{Intro}\n"
+            "%\\VignetteEncoding{UTF-8}\n"
+            "-->\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_vignettes(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "VIG-08" in rule_ids
+
+    def test_vig08_builder_in_suggests_not_imports(self, tmp_path):
+        """VIG-08: VignetteBuilder in Suggests but not Imports should be flagged."""
+        pkg = self._make_pkg(
+            tmp_path,
+            description_extra="VignetteBuilder: knitr\nSuggests: knitr, rmarkdown"
+        )
+        (pkg / "vignettes").mkdir()
+        (pkg / "vignettes" / "intro.Rmd").write_text(
+            "---\ntitle: Intro\n---\n"
+            "<!--\n"
+            "%\\VignetteEngine{knitr::rmarkdown}\n"
+            "%\\VignetteIndexEntry{Intro}\n"
+            "%\\VignetteEncoding{UTF-8}\n"
+            "-->\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_vignettes(pkg, desc)
+        rule_ids = [f.rule_id for f in findings]
+        assert "VIG-08" in rule_ids
+
+    def test_vig08_builder_in_imports_ok(self, tmp_path):
+        """VIG-08: VignetteBuilder in Imports should NOT be flagged."""
+        pkg = self._make_pkg(
+            tmp_path,
+            description_extra="VignetteBuilder: knitr\nImports: knitr\nSuggests: rmarkdown"
+        )
+        (pkg / "vignettes").mkdir()
+        (pkg / "vignettes" / "intro.Rmd").write_text(
+            "---\ntitle: Intro\n---\n"
+            "<!--\n"
+            "%\\VignetteEngine{knitr::rmarkdown}\n"
+            "%\\VignetteIndexEntry{Intro}\n"
+            "%\\VignetteEncoding{UTF-8}\n"
+            "-->\n"
+        )
+        desc = check.parse_description(pkg)
+        findings = check.check_vignettes(pkg, desc)
+        vig08 = [f for f in findings if f.rule_id == "VIG-08"]
+        assert len(vig08) == 0
+
 
 # ============================================================================
 # Severity constants test

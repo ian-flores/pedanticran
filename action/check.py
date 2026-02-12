@@ -1057,6 +1057,16 @@ def check_description_fields(path: Path, desc: dict) -> list[Finding]:
                 cran_says="Non-ASCII characters in DESCRIPTION."
             ))
 
+    # CODE-17: UseLTO causes CPU time NOTE
+    if "UseLTO" in desc:
+        findings.append(Finding(
+            rule_id="CODE-17", severity="note",
+            title="UseLTO field in DESCRIPTION",
+            message="UseLTO triggers parallel compilation, causing 'Installation took CPU time X times elapsed time' NOTE. Remove unless absolutely needed.",
+            file=desc_file,
+            cran_says="Installation took CPU time 3.5 times elapsed time"
+        ))
+
     # License validity (basic check)
     valid_licenses = {
         "GPL-2", "GPL-3", "GPL (>= 2)", "GPL (>= 3)",
@@ -1262,6 +1272,159 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                     cran_says="R CMD check flags browser() under --as-cran."
                 ))
 
+        # CODE-07: Clean up temporary files
+        # Find tempfile()/tempdir() calls not accompanied by unlink()/on.exit() in the same function
+        for lnum, line in scan_file(rf, r'\btempfile\s*\(|\btempdir\s*\('):
+            if is_in_comment(line):
+                continue
+            # Read the full file to check if unlink/on.exit/withr::local_tempfile is nearby
+            try:
+                full_text = rf.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                full_text = ""
+            has_cleanup = bool(
+                re.search(r'\bunlink\s*\(', full_text)
+                or re.search(r'\bon\.exit\s*\(', full_text)
+                or re.search(r'\bfile\.remove\s*\(', full_text)
+                or re.search(r'\bwithr::local_tempfile\b', full_text)
+                or re.search(r'\bwithr::local_tempdir\b', full_text)
+            )
+            if not has_cleanup:
+                findings.append(Finding(
+                    rule_id="CODE-07", severity="warning",
+                    title="Temporary files may not be cleaned up",
+                    message=f"tempfile()/tempdir() used without unlink()/on.exit() cleanup: `{line[:80]}`",
+                    file=rel, line=lnum,
+                    cran_says="Found the following files/directories: detritus"
+                ))
+                break  # One finding per file is enough
+
+        # CODE-10: Maximum 2 cores
+        parallel_patterns = [
+            (r'\bdetectCores\s*\(', 'detectCores()'),
+            (r'\bparallel::detectCores\s*\(', 'parallel::detectCores()'),
+            (r'\bmakeCluster\s*\(', 'makeCluster()'),
+            (r'\bmclapply\s*\(', 'mclapply()'),
+            (r'\bmcparallel\s*\(', 'mcparallel()'),
+        ]
+        try:
+            full_text_10 = rf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            full_text_10 = ""
+        # Check if there's a min(..., 2) capping pattern in the file
+        has_core_cap = bool(
+            re.search(r'\bmin\s*\(.*,\s*2\s*\)', full_text_10)
+            or re.search(r'\bmin\s*\(\s*2\s*,', full_text_10)
+            or re.search(r'getOption\s*\(\s*["\']mc\.cores["\']', full_text_10)
+        )
+        for pattern, name in parallel_patterns:
+            for lnum, line in scan_file(rf, pattern):
+                if is_in_comment(line):
+                    continue
+                if not has_core_cap:
+                    findings.append(Finding(
+                        rule_id="CODE-10", severity="error",
+                        title="Uncapped parallel core usage",
+                        message=f"{name} without min(..., 2) capping: `{line[:80]}`. CRAN requires max 2 cores.",
+                        file=rel, line=lnum,
+                        cran_says="Please ensure that you do not use more than 2 cores."
+                    ))
+        # Also flag OMP_NUM_THREADS setting without capping
+        for lnum, line in scan_file(rf, r'Sys\.setenv\s*\(\s*["\']?OMP_NUM_THREADS'):
+            if not is_in_comment(line):
+                findings.append(Finding(
+                    rule_id="CODE-10", severity="error",
+                    title="OMP_NUM_THREADS set in package code",
+                    message=f"Setting OMP_NUM_THREADS in package code: `{line[:80]}`. Ensure max 2 threads.",
+                    file=rel, line=lnum,
+                    cran_says="Please ensure that you do not use more than 2 cores."
+                ))
+
+        # CODE-14: No disabling SSL/TLS verification
+        ssl_patterns = [
+            r'ssl_verifypeer\s*=\s*(?:0|FALSE|F)\b',
+            r'ssl\.verifypeer\s*=\s*(?:0|FALSE|F)\b',
+            r'ssl_verifyhost\s*=\s*(?:0|FALSE|F)\b',
+        ]
+        for ssl_pat in ssl_patterns:
+            for lnum, line in scan_file(rf, ssl_pat, re.IGNORECASE):
+                if not is_in_comment(line):
+                    findings.append(Finding(
+                        rule_id="CODE-14", severity="error",
+                        title="SSL/TLS verification disabled",
+                        message=f"Do not disable SSL certificate verification: `{line[:80]}`",
+                        file=rel, line=lnum,
+                        cran_says="Must not circumvent security provisions like disabling SSL certificate verification."
+                    ))
+
+        # CODE-21: class(x) == "matrix" / "data.frame" / "array" comparisons
+        for lnum, line in scan_file(rf, r'\bclass\s*\([^)]+\)\s*==\s*["\']'):
+            if is_in_comment(line):
+                continue
+            findings.append(Finding(
+                rule_id="CODE-21", severity="warning",
+                title="class(x) == comparison (fragile)",
+                message=f"Use inherits(x, \"class\") or is.*(x) instead of class(x) ==: `{line[:80]}`",
+                file=rel, line=lnum,
+                cran_says="the condition has length > 1 and only the first element will be used"
+            ))
+
+        # CODE-22: if(class(x) ...) — condition length > 1
+        for lnum, line in scan_file(rf, r'\bif\s*\(\s*class\s*\('):
+            if is_in_comment(line):
+                continue
+            findings.append(Finding(
+                rule_id="CODE-22", severity="warning",
+                title="if(class(...)) may have length > 1",
+                message=f"class() can return length > 1 vector. Use inherits() instead: `{line[:80]}`",
+                file=rel, line=lnum,
+                cran_says="the condition has length > 1"
+            ))
+
+        # CODE-19: Staged installation — top-level system.file() calls
+        try:
+            lines_19 = rf.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            lines_19 = []
+        brace_depth_19 = 0
+        for i, line_19 in enumerate(lines_19, 1):
+            # Track brace depth to detect top-level code
+            for ch in line_19:
+                if ch == '{':
+                    brace_depth_19 += 1
+                elif ch == '}':
+                    brace_depth_19 -= 1
+            if brace_depth_19 == 0 and not is_in_comment(line_19.strip()):
+                # Top-level assignment with system.file()
+                if re.search(r'(<-|=)\s*system\.file\s*\(', line_19):
+                    findings.append(Finding(
+                        rule_id="CODE-19", severity="warning",
+                        title="Top-level system.file() breaks staged install",
+                        message=f"system.file() at top level caches install-time paths: `{line_19.strip()[:80]}`",
+                        file=rel, line=i,
+                        cran_says="ERROR: installation of package had non-zero exit status"
+                    ))
+
+        # NS-08: No library()/require() in package code
+        for lnum, line in scan_file(rf, r'\b(?:library|require)\s*\('):
+            if is_in_comment(line):
+                continue
+            # Skip requireNamespace() — that's the correct pattern
+            if re.search(r'\brequireNamespace\s*\(', line):
+                continue
+            # Skip if inside if(interactive()) or if(requireNamespace()) blocks
+            if re.search(r'if\s*\(\s*interactive\s*\(\s*\)', line):
+                continue
+            if re.search(r'if\s*\(\s*requireNamespace\s*\(', line):
+                continue
+            findings.append(Finding(
+                rule_id="NS-08", severity="error",
+                title="library()/require() in package code",
+                message=f"Use pkg::func() or NAMESPACE imports, not library()/require(): `{line[:80]}`",
+                file=rel, line=lnum,
+                cran_says="library() or require() calls in package code"
+            ))
+
     # C/C++ checks
     for sf in find_src_files(path):
         rel = str(sf.relative_to(path))
@@ -1299,6 +1462,50 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                                 file=rel, line=lnum,
                                 cran_says="Function declaration isn't a prototype."
                             ))
+
+            # COMP-01: C23 keyword conflicts
+            if ext in (".c", ".h"):
+                c23_patterns = [
+                    (r'#\s*define\s+bool\b', '#define bool'),
+                    (r'#\s*define\s+true\b', '#define true'),
+                    (r'#\s*define\s+false\b', '#define false'),
+                    (r'\btypedef\b.*\bbool\b', 'typedef ... bool'),
+                ]
+                for c23_pat, c23_desc in c23_patterns:
+                    for lnum, line in scan_file(sf, c23_pat):
+                        # Don't use is_in_comment() here — # starts C preprocessor, not a comment
+                        # C comments use // or /* */
+                        stripped = line.strip()
+                        if stripped.startswith("//") or stripped.startswith("/*"):
+                            continue
+                        findings.append(Finding(
+                            rule_id="COMP-01", severity="error",
+                            title="C23 keyword conflict",
+                            message=f"R 4.5+ uses C23 where bool/true/false are keywords. Remove {c23_desc}: `{line.strip()[:80]}`",
+                            file=rel, line=lnum,
+                            cran_says="Compiler error or -Wkeyword-macro warning under C23."
+                        ))
+
+            # COMP-03: Non-API entry points
+            non_api_symbols = [
+                'DATAPTR', 'STRING_PTR', 'STDVEC_DATAPTR', 'SET_TYPEOF',
+                'IS_LONG_VEC', 'PRCODE', 'PRENV', 'PRVALUE', 'R_nchar',
+                'Rf_NonNullStringMatch', 'R_shallow_duplicate_attr',
+                'Rf_StringBlank', 'TRUELENGTH', 'XLENGTH_EX', 'XTRUELENGTH',
+                'VECTOR_PTR', 'R_tryWrap',
+            ]
+            non_api_pattern = r'\b(' + '|'.join(re.escape(s) for s in non_api_symbols) + r')\b'
+            for lnum, line in scan_file(sf, non_api_pattern):
+                if not is_in_comment(line):
+                    m = re.search(non_api_pattern, line)
+                    sym = m.group(1) if m else "unknown"
+                    findings.append(Finding(
+                        rule_id="COMP-03", severity="warning",
+                        title=f"Non-API entry point: {sym}",
+                        message=f"Use supported API equivalents: `{line.strip()[:80]}`",
+                        file=rel, line=lnum,
+                        cran_says="Found non-API calls to R."
+                    ))
 
             # COMP-02: bare R API names in C++ (R_NO_REMAP)
             if ext in (".cpp", ".cc"):
@@ -1372,6 +1579,207 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                         message=f"GNU make extension without SystemRequirements: GNU make: `{line.strip()[:80]}`",
                         file=rel, line=lnum,
                     ))
+
+    # COMP-09: Rust package requirements
+    cargo_toml = path / "src" / "Cargo.toml"
+    if not cargo_toml.exists():
+        cargo_toml = path / "Cargo.toml"
+    if cargo_toml.exists():
+        # Check for vendored crates
+        has_vendor = (
+            (path / "src" / "rust" / "vendor").is_dir()
+            or (path / "vendor").is_dir()
+            or (path / "src" / "vendor").is_dir()
+        )
+        if not has_vendor:
+            findings.append(Finding(
+                rule_id="COMP-09", severity="warning",
+                title="Rust crates not vendored",
+                message="Cargo.toml found but no vendor/ directory. CRAN requires vendored crate dependencies (no network during build).",
+                file=str(cargo_toml.relative_to(path)),
+                cran_says="Rejects packages that download Rust crates during installation."
+            ))
+        # Check for configure script
+        if not (path / "configure").exists():
+            findings.append(Finding(
+                rule_id="COMP-09", severity="warning",
+                title="Missing configure script for Rust package",
+                message="Cargo.toml found but no configure script. CRAN requires reporting rustc version before compilation.",
+                file=str(cargo_toml.relative_to(path)),
+                cran_says="Must report rustc version before compilation."
+            ))
+
+    # COMP-10: Native routine registration
+    src_dir = path / "src"
+    if src_dir.is_dir():
+        has_c_cpp = bool(list(src_dir.glob("*.c")) or list(src_dir.glob("*.cpp")) or list(src_dir.glob("*.cc")))
+        if has_c_cpp:
+            # Check if R code uses .Call/.C/.Fortran/.External
+            has_native_call = False
+            for rf in find_r_files(path):
+                for _, line in scan_file(rf, r'\.Call\s*\(|\.C\s*\(|\.Fortran\s*\(|\.External\s*\('):
+                    if not is_in_comment(line):
+                        has_native_call = True
+                        break
+                if has_native_call:
+                    break
+            if has_native_call:
+                # Check for init.c or registration.c
+                has_init = (
+                    (src_dir / "init.c").exists()
+                    or (src_dir / "registration.c").exists()
+                    or (src_dir / "init.cpp").exists()
+                )
+                if not has_init:
+                    # Also check if any .c file contains R_registerRoutines
+                    has_register = False
+                    for sf in find_src_files(path):
+                        for _, line in scan_file(sf, r'R_registerRoutines'):
+                            has_register = True
+                            break
+                        if has_register:
+                            break
+                    if not has_register:
+                        findings.append(Finding(
+                            rule_id="COMP-10", severity="warning",
+                            title="Missing native routine registration",
+                            message="Package uses .Call()/.C() but no R_registerRoutines() found. Add src/init.c with registration.",
+                            file="src/",
+                            cran_says="Found no calls to: R_registerRoutines, R_useDynamicSymbols."
+                        ))
+                # Check NAMESPACE for useDynLib with registration
+                ns = parse_namespace(path)
+                ns_text = "\n".join(ns.get("raw_lines", []))
+                if "useDynLib" not in ns_text:
+                    findings.append(Finding(
+                        rule_id="COMP-10", severity="warning",
+                        title="Missing useDynLib in NAMESPACE",
+                        message="Package has compiled code and uses native interfaces but NAMESPACE has no useDynLib().",
+                        file="NAMESPACE",
+                        cran_says="It is good practice to register native routines."
+                    ))
+
+    # COMP-12: UCRT Windows toolchain compatibility
+    makevars_win = path / "src" / "Makevars.win"
+    if makevars_win.exists():
+        rel_mvw = str(makevars_win.relative_to(path))
+        for lnum, line in scan_file(makevars_win, r'\$\(MINGW_PREFIX\)'):
+            findings.append(Finding(
+                rule_id="COMP-12", severity="warning",
+                title="Obsolete $(MINGW_PREFIX) reference",
+                message=f"$(MINGW_PREFIX) is from the old MSVCRT toolchain: `{line.strip()[:80]}`",
+                file=rel_mvw, line=lnum,
+                cran_says="Compilation or linking failures on Windows."
+            ))
+        for lnum, line in scan_file(makevars_win, r'\bdownload\.file\b'):
+            findings.append(Finding(
+                rule_id="COMP-12", severity="warning",
+                title="Download of pre-compiled binaries in Makevars.win",
+                message=f"Do not download pre-compiled binaries: `{line.strip()[:80]}`",
+                file=rel_mvw, line=lnum,
+                cran_says="Packages must not download pre-compiled MSVCRT libraries."
+            ))
+        for lnum, line in scan_file(makevars_win, r'\bCRT_|MSVCRT', re.IGNORECASE):
+            findings.append(Finding(
+                rule_id="COMP-12", severity="warning",
+                title="MSVCRT-specific reference in Makevars.win",
+                message=f"R 4.2+ uses UCRT, not MSVCRT: `{line.strip()[:80]}`",
+                file=rel_mvw, line=lnum,
+                cran_says="External DLLs must be compatible with UCRT."
+            ))
+    # Also check configure.win for download.file
+    configure_win = path / "configure.win"
+    if configure_win.exists():
+        rel_cw = str(configure_win.relative_to(path))
+        for lnum, line in scan_file(configure_win, r'\bdownload\.file\b'):
+            findings.append(Finding(
+                rule_id="COMP-12", severity="warning",
+                title="Download of pre-compiled binaries in configure.win",
+                message=f"Do not download pre-compiled binaries at install time: `{line.strip()[:80]}`",
+                file=rel_cw, line=lnum,
+                cran_says="Packages must not download pre-compiled MSVCRT libraries."
+            ))
+
+    # DEP-02: Suggested Packages Must Be Used Conditionally
+    suggests_raw = desc.get("Suggests", "")
+    if suggests_raw:
+        suggested_pkgs = set()
+        for entry in suggests_raw.split(","):
+            pkg_name = entry.strip().split("(")[0].strip()
+            if pkg_name:
+                suggested_pkgs.add(pkg_name)
+        for rf in r_files:
+            rel = str(rf.relative_to(path))
+            try:
+                full_text = rf.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            lines = full_text.splitlines()
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                # Look for library(pkg) or require(pkg) calls
+                m = re.search(r'\b(?:library|require)\s*\(\s*["\']?(\w+)["\']?\s*\)', stripped)
+                if not m:
+                    continue
+                pkg_name = m.group(1)
+                if pkg_name not in suggested_pkgs:
+                    continue
+                # Skip requireNamespace
+                if re.search(r'\brequireNamespace\s*\(', stripped):
+                    continue
+                # Check if wrapped in if(requireNamespace(...)) or if(require(...))
+                if re.search(r'if\s*\(\s*requireNamespace\s*\(', stripped):
+                    continue
+                if re.search(r'if\s*\(\s*require\s*\(', stripped):
+                    continue
+                findings.append(Finding(
+                    rule_id="DEP-02", severity="warning",
+                    title=f"Suggested package '{pkg_name}' used unconditionally",
+                    message=f"library({pkg_name})/require({pkg_name}) without conditional check. Wrap in if(requireNamespace(...)): `{stripped[:80]}`",
+                    file=rel, line=i,
+                    cran_says="Packages in Suggests should be used conditionally."
+                ))
+
+    # NET-01: Must Fail Gracefully When Resources Unavailable
+    network_call_patterns = [
+        (r'\bdownload\.file\s*\(', 'download.file()'),
+        (r'\burl\s*\(', 'url()'),
+        (r'\bhttr::GET\s*\(', 'httr::GET()'),
+        (r'\bhttr::POST\s*\(', 'httr::POST()'),
+        (r'\bcurl::curl\s*\(', 'curl::curl()'),
+        (r'\bRCurl::getURL\s*\(', 'RCurl::getURL()'),
+    ]
+    for rf in r_files:
+        rel = str(rf.relative_to(path))
+        try:
+            full_text = rf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        lines = full_text.splitlines()
+        has_trycatch = bool(re.search(r'\btryCatch\s*\(', full_text) or
+                           re.search(r'\btry\s*\(', full_text) or
+                           re.search(r'\bwithCallingHandlers\s*\(', full_text))
+        if has_trycatch:
+            continue  # File has error handling; skip (conservative)
+        for net_pat, net_name in network_call_patterns:
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    continue
+                if re.search(net_pat, stripped):
+                    findings.append(Finding(
+                        rule_id="NET-01", severity="warning",
+                        title=f"Network call ({net_name}) without error handling",
+                        message=f"Wrap network calls in tryCatch()/try() for graceful failure when offline: `{stripped[:80]}`",
+                        file=rel, line=i,
+                        cran_says="Package must not error or produce check warnings if internet resources are unavailable."
+                    ))
+                    break  # One finding per file per pattern is enough
+            else:
+                continue
+            break  # One finding per file is enough
 
     return findings
 
@@ -1527,6 +1935,127 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
                                 file=rel, line=block_start,
                             ))
                     in_roxygen = False
+
+    # DOC-07: Use Canonical CRAN/Bioconductor URLs
+    non_canonical_patterns = [
+        (r'http://cran\.r-project\.org/web/packages/', 'https://CRAN.R-project.org/package='),
+        (r'http://www\.bioconductor\.org/packages/', 'https://bioconductor.org/packages/'),
+        (r'http://cran\.r-project\.org/', 'https://CRAN.R-project.org/'),
+    ]
+    files_for_url_check: list[tuple[Path, str]] = []
+    for rd in rd_files:
+        files_for_url_check.append((rd, str(rd.relative_to(path))))
+    for vf in _find_vignette_files(path):
+        files_for_url_check.append((vf, str(vf.relative_to(path))))
+    desc_path = path / "DESCRIPTION"
+    if desc_path.exists():
+        files_for_url_check.append((desc_path, "DESCRIPTION"))
+    for fpath, rel in files_for_url_check:
+        for pat, replacement in non_canonical_patterns:
+            for lnum, line in scan_file(fpath, pat, re.IGNORECASE):
+                findings.append(Finding(
+                    rule_id="DOC-07", severity="note",
+                    title="Non-canonical CRAN/Bioconductor URL",
+                    message=f"Use canonical URL form ({replacement}...): `{line[:80]}`",
+                    file=rel, line=lnum,
+                    cran_says="Use canonical URL forms."
+                ))
+
+    # DOC-08: Lost Braces in Rd Documentation
+    for rd in rd_files:
+        rel = str(rd.relative_to(path))
+        try:
+            text = rd.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            # Detect \itemize{ \item{text}{desc} } — wrong pattern
+            # In \itemize, items should be \item text, not \item{text}{desc}
+            if r'\itemize' in text:
+                if re.search(r'\\item\{[^}]+\}\{', line):
+                    findings.append(Finding(
+                        rule_id="DOC-08", severity="warning",
+                        title="Lost braces: \\item{}{} inside \\itemize",
+                        message=f"\\itemize uses '\\item text', not '\\item{{text}}{{desc}}' (that's for \\describe): `{line.strip()[:80]}`",
+                        file=rel, line=i,
+                        cran_says="Lost braces in Rd parsing."
+                    ))
+
+    # DOC-09: HTML5 Rd Validation
+    deprecated_html_tags = [
+        r'<font\b', r'<center\b', r'<strike\b', r'<big\b',
+        r'<small\b', r'<tt\b',
+    ]
+    deprecated_html_attrs = [
+        r'\bbgcolor\s*=', r'\balign\s*=',
+    ]
+    deprecated_html_pattern = '|'.join(deprecated_html_tags + deprecated_html_attrs)
+    for rd in rd_files:
+        rel = str(rd.relative_to(path))
+        for lnum, line in scan_file(rd, r'\\if\{html\}\{\\out\{'):
+            # Check if line or nearby content uses deprecated HTML
+            if re.search(deprecated_html_pattern, line, re.IGNORECASE):
+                findings.append(Finding(
+                    rule_id="DOC-09", severity="warning",
+                    title="Deprecated HTML4 element in Rd \\out{} block",
+                    message=f"Use HTML5-compatible elements (no <font>, <center>, <strike>, <big>, <small>, <tt>, bgcolor=): `{line.strip()[:80]}`",
+                    file=rel, line=lnum,
+                    cran_says="HTML validation issues in rendered help pages."
+                ))
+
+    # DOC-10: \donttest Examples Now Executed Under --as-cran
+    files_for_donttest = [(rd, str(rd.relative_to(path))) for rd in rd_files]
+    files_for_donttest += [(rf, str(rf.relative_to(path))) for rf in r_files]
+    for fpath, rel in files_for_donttest:
+        for lnum, line in scan_file(fpath, r'\\donttest\{'):
+            findings.append(Finding(
+                rule_id="DOC-10", severity="note",
+                title="\\donttest{} examples ARE executed under --as-cran",
+                message="Since R 4.0, \\donttest{} code runs during CRAN checks. Ensure these examples work without credentials, special hardware, or long runtimes.",
+                file=rel, line=lnum,
+                cran_says="Running examples in 'package-Ex.R' failed"
+            ))
+            break  # One finding per file is enough
+
+    # DOC-11: Duplicated Vignette Titles
+    vig_files_doc = _find_vignette_files(path)
+    if vig_files_doc:
+        title_map: dict[str, list[str]] = {}
+        for vf in vig_files_doc:
+            meta = parse_vignette_metadata(vf)
+            title = None
+            if meta["index_entry"]:
+                title = meta["index_entry"][1]
+            else:
+                # Fall back to YAML title
+                try:
+                    text = vf.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+                in_yaml = False
+                for line in text.splitlines():
+                    if line.strip() == '---':
+                        if not in_yaml:
+                            in_yaml = True
+                            continue
+                        else:
+                            break
+                    if in_yaml:
+                        m = re.match(r'\s*title\s*:\s*["\']?(.+?)["\']?\s*$', line)
+                        if m:
+                            title = m.group(1)
+                            break
+            if title:
+                title_map.setdefault(title, []).append(str(vf.relative_to(path)))
+        for title_val, files in title_map.items():
+            if len(files) > 1:
+                findings.append(Finding(
+                    rule_id="DOC-11", severity="warning",
+                    title="Duplicated vignette title",
+                    message=f"Title '{title_val}' is used by multiple vignettes: {', '.join(files)}",
+                    file=files[0],
+                    cran_says="Duplicated vignette titles/index entries."
+                ))
 
     return findings
 
@@ -1942,6 +2471,47 @@ def check_vignettes(path: Path, desc: dict) -> list[Finding]:
                     cran_says="Installed size is too large."
                 ))
 
+    # VIG-08: Custom Vignette Engine Bootstrap
+    vb_raw = desc.get("VignetteBuilder", "")
+    if vb_raw:
+        pkg_name = desc.get("Package", "")
+        vb_entries = [x.strip() for x in vb_raw.split(",") if x.strip()]
+        # Check if package lists itself as VignetteBuilder
+        if pkg_name and pkg_name in vb_entries:
+            findings.append(Finding(
+                rule_id="VIG-08", severity="warning",
+                title="Package lists itself as VignetteBuilder",
+                message=f"VignetteBuilder includes '{pkg_name}' — the package itself. This creates a bootstrap problem: the engine won't be available during R CMD check.",
+                file=str(path / "DESCRIPTION"),
+                cran_says="Package has 'vignettes' subdirectory but apparently no vignettes."
+            ))
+        # Check if VignetteBuilder package is in Suggests but not Imports
+        imports_raw = desc.get("Imports", "")
+        imports_pkgs = set()
+        if imports_raw:
+            for entry in imports_raw.split(","):
+                p = entry.strip().split("(")[0].strip()
+                if p:
+                    imports_pkgs.add(p)
+        suggests_raw = desc.get("Suggests", "")
+        suggests_pkgs = set()
+        if suggests_raw:
+            for entry in suggests_raw.split(","):
+                p = entry.strip().split("(")[0].strip()
+                if p:
+                    suggests_pkgs.add(p)
+        for vb_entry in vb_entries:
+            if vb_entry == pkg_name:
+                continue  # Already flagged above
+            if vb_entry in suggests_pkgs and vb_entry not in imports_pkgs:
+                findings.append(Finding(
+                    rule_id="VIG-08", severity="warning",
+                    title=f"VignetteBuilder '{vb_entry}' is in Suggests, not Imports",
+                    message=f"'{vb_entry}' is listed as VignetteBuilder but only in Suggests. Move to Imports to ensure availability during vignette building.",
+                    file=str(path / "DESCRIPTION"),
+                    cran_says="Package has 'vignettes' subdirectory but apparently no vignettes."
+                ))
+
     return findings
 
 
@@ -2051,6 +2621,40 @@ def check_namespace(path: Path, desc: dict) -> list[Finding]:
             message=message, file="DESCRIPTION",
             cran_says="The Depends field should nowadays be used rarely.",
         ))
+
+    # NS-07: Re-Export Documentation Requirements
+    # Find functions that are both importFrom'd and export'd — these are re-exports
+    imported_funcs: dict[str, str] = {}  # func -> pkg
+    for pkg, fun, _ in ns["import_from"]:
+        imported_funcs[fun] = pkg
+    exported_funcs = set()
+    for fun, _ in ns["exports"]:
+        exported_funcs.add(fun)
+    reexports = exported_funcs & set(imported_funcs.keys())
+    if reexports:
+        man_dir = path / "man"
+        documented = set()
+        if man_dir.is_dir():
+            for rd in sorted(man_dir.glob("*.Rd")):
+                try:
+                    text = rd.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+                for m in re.finditer(r"\\alias\{([^}]+)\}", text):
+                    # Strip Rd-level backslash escapes (e.g., \% -> %)
+                    alias = m.group(1).replace("\\", "")
+                    documented.add(alias)
+                    # Also add the raw form for exact match
+                    documented.add(m.group(1))
+        for fun in sorted(reexports):
+            if fun not in documented:
+                findings.append(Finding(
+                    rule_id="NS-07", severity="note",
+                    title=f"Re-exported '{fun}' lacks documentation",
+                    message=f"'{fun}' is imported from '{imported_funcs[fun]}' and re-exported but has no .Rd documentation.",
+                    file=ns_rel,
+                    cran_says="Please add \\value to .Rd files regarding exported methods."
+                ))
 
     return findings
 
@@ -2177,6 +2781,81 @@ def check_data(path: Path, desc: dict) -> list[Finding]:
                 message=msg, file=str(f.relative_to(path)),
                 cran_says="checking contents of 'data' directory",
             ))
+
+    # DATA-07: Serialization Version Incompatibility
+    # Check .rda/.RData files for serialization v3 format
+    depends_r_version = None
+    depends_str = desc.get("Depends", "")
+    r_version_match = re.search(r'R\s*\(\s*>=\s*([0-9.]+)\s*\)', depends_str)
+    if r_version_match:
+        depends_r_version = r_version_match.group(1)
+    for f in data_files:
+        if f.suffix.lower() not in (".rda", ".rdata"):
+            continue
+        try:
+            with open(f, 'rb') as fh:
+                header = fh.read(10)
+        except Exception:
+            continue
+        is_v3 = False
+        # Check for uncompressed RDX3/RDA3 magic
+        if header[:4] in (b'RDX3', b'RDA3'):
+            is_v3 = True
+        # Check for gzip-compressed data (starts with 1f 8b)
+        elif header[:2] == b'\x1f\x8b':
+            import gzip
+            try:
+                with gzip.open(f, 'rb') as gz:
+                    inner = gz.read(10)
+                if inner[:4] in (b'RDX3', b'RDA3'):
+                    is_v3 = True
+            except Exception:
+                pass
+        # Check for xz-compressed data (starts with FD 37 7A 58 5A 00)
+        elif header[:6] == b'\xfd7zXZ\x00':
+            import lzma
+            try:
+                with lzma.open(f, 'rb') as xz:
+                    inner = xz.read(10)
+                if inner[:4] in (b'RDX3', b'RDA3'):
+                    is_v3 = True
+            except Exception:
+                pass
+        # Check for bz2-compressed data (starts with BZ)
+        elif header[:2] == b'BZ':
+            import bz2
+            try:
+                with bz2.open(f, 'rb') as bz:
+                    inner = bz.read(10)
+                if inner[:4] in (b'RDX3', b'RDA3'):
+                    is_v3 = True
+            except Exception:
+                pass
+        if is_v3:
+            rel_f = str(f.relative_to(path))
+            if depends_r_version:
+                # Parse version to check if >= 3.5.0
+                parts = depends_r_version.split(".")
+                try:
+                    major, minor = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+                except ValueError:
+                    major, minor = 0, 0
+                if major < 3 or (major == 3 and minor < 5):
+                    findings.append(Finding(
+                        rule_id="DATA-07", severity="warning",
+                        title=f"Serialization v3 data incompatible with declared R version",
+                        message=f"'{f.name}' uses serialization v3 (requires R >= 3.5.0) but Depends declares R >= {depends_r_version}.",
+                        file=rel_f,
+                        cran_says="Added dependency on R >= 3.5.0 because serialized objects in serialize/load version 3 cannot be read in older versions of R."
+                    ))
+            else:
+                findings.append(Finding(
+                    rule_id="DATA-07", severity="warning",
+                    title=f"Serialization v3 data adds implicit R >= 3.5.0 dependency",
+                    message=f"'{f.name}' uses serialization v3. Add 'Depends: R (>= 3.5.0)' to DESCRIPTION or re-save with version 2.",
+                    file=rel_f,
+                    cran_says="Added dependency on R >= 3.5.0 because serialized objects in serialize/load version 3 cannot be read in older versions of R."
+                ))
 
     # DATA-08: sysdata.rda
     sysdata = path / "R" / "sysdata.rda"
@@ -2319,6 +2998,51 @@ def check_system_requirements(path: Path, desc: dict) -> list[Finding]:
                 file="DESCRIPTION",
                 cran_says="Packages can opt out of C23 via SystemRequirements: USE_C17.",
             ))
+
+    # SYS-03: C++20 Default Standard Transition
+    makevars_cxx = _parse_makevars_cxx_std(path)
+    for std_val, mv_file, mv_line in makevars_cxx:
+        if std_val in ("C++11", "C++14"):
+            # Already covered by COMP-06, but emit SYS-03 NOTE too
+            findings.append(Finding(
+                rule_id="SYS-03", severity="note",
+                title=f"Deprecated C++ standard: {std_val}",
+                message=f"{mv_file} sets CXX_STD to {std_val} which is being deprecated. R 4.6+ defaults to C++20.",
+                file=mv_file, line=mv_line,
+                cran_says="R 4.6.0: C++20 is now the default C++ standard where available."
+            ))
+        elif std_val == "C++17":
+            findings.append(Finding(
+                rule_id="SYS-03", severity="note",
+                title="Explicit C++17 standard set — review C++20 compatibility",
+                message=f"{mv_file} sets CXX_STD to CXX17. R 4.6+ defaults to C++20. Verify compatibility or remove CXX_STD line.",
+                file=mv_file, line=mv_line,
+                cran_says="R 4.6.0: C++20 is now the default C++ standard where available."
+            ))
+
+    # SYS-04: Configure Script Missing for System Libraries
+    src_dir = path / "src"
+    if src_dir.is_dir():
+        has_compiled_code = bool(
+            list(src_dir.glob("*.c")) or list(src_dir.glob("*.cpp")) or
+            list(src_dir.glob("*.cc")) or list(src_dir.glob("*.f")) or
+            list(src_dir.glob("*.f90")) or list(src_dir.glob("*.f95"))
+        )
+        has_sysreqs = bool(desc.get("SystemRequirements", "").strip())
+        if has_compiled_code and has_sysreqs:
+            has_configure = (
+                (path / "configure").exists() or
+                (path / "configure.ac").exists() or
+                (path / "configure.in").exists()
+            )
+            if not has_configure:
+                findings.append(Finding(
+                    rule_id="SYS-04", severity="note",
+                    title="Missing configure script for package with SystemRequirements",
+                    message=f"Package has compiled code and SystemRequirements but no configure/configure.ac/configure.in script.",
+                    file="DESCRIPTION",
+                    cran_says="Packages should check for the presence of required tools."
+                ))
 
     return findings
 
