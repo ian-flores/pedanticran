@@ -2,7 +2,7 @@
 
 Every rule includes: what CRAN requires, how they reject it (verbatim feedback), how to detect it, and how to fix it.
 
-Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Consortium), ThinkR prepare-for-cran, devtools/usethis release checklist, community experience.
+Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Consortium), ThinkR prepare-for-cran, devtools/usethis release checklist, community experience, R-package-devel mailing list archives (2015-2025), R NEWS for R 3.2 through R 4.5.
 
 ---
 
@@ -16,6 +16,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Parse the Title field. Check each word against title case rules. Use `tools::toTitleCase()` logic.
 - **Fix**: Apply title case transformation. Watch for acronyms (keep uppercase), package names (keep as-is in single quotes), and small words.
 - **Files**: `DESCRIPTION`
+- **Since**: R 3.2.0 (2015) — automated title case validation added to R CMD check
 
 ### DESC-02: Package/Software Names Must Be in Single Quotes
 
@@ -25,6 +26,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Scan Title and Description for known R package names (from CRAN/Bioconductor), common software names (Python, Java, C++, OpenSSL, TensorFlow, etc.), and API names without single quotes.
 - **Fix**: Wrap each name in single quotes: `Python` → `'Python'`, `ggplot2` → `'ggplot2'`
 - **Files**: `DESCRIPTION`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### DESC-03: No "for R" / "in R" / "with R" in Title
 
@@ -34,6 +36,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Regex scan Title for `\b(for|in|with)\s+R\b` or `\bR\s+(package|library)\b` (case-insensitive, but careful not to match R inside words).
 - **Fix**: Remove the redundant phrase. "A Plotting Library for R" → "A Plotting Library".
 - **Files**: `DESCRIPTION`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### DESC-04: Description Must Not Start with Package Name, "A package...", or Title
 
@@ -43,6 +46,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Check first word/phrase of Description against: package name, "A package", "This package", "The package", and the Title text.
 - **Fix**: Rewrite opening to describe functionality directly. "Provides methods for..." or "Implements the algorithm described in..."
 - **Files**: `DESCRIPTION`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### DESC-05: Description Must Be 2+ Complete Sentences
 
@@ -51,6 +55,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Count sentence-ending punctuation (periods followed by space or end of field). Check for minimum length.
 - **Fix**: Expand Description to include what the package does, how, and why.
 - **Files**: `DESCRIPTION`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### DESC-06: DOI/URL Formatting
 
@@ -60,6 +65,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Regex for `doi:\s+` (space after colon), DOIs not in angle brackets, URLs not in angle brackets.
 - **Fix**: Reformat to `<doi:10.xxxx/yyyy>` with no spaces.
 - **Files**: `DESCRIPTION`
+- **Since**: R 3.3.0 (2016) — DOI validation in CITATION and Rd files added; format requirements enforced since ~2016-2017 policy revisions
 
 ### DESC-07: Acronyms Must Be Explained
 
@@ -69,6 +75,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find uppercase sequences (2+ letters) that aren't common (API, URL, HTTP, SQL, CSV, JSON, XML, HTML, PDF, GUI, CLI, IDE, OS, IO, UI, ID). Flag unexplained ones.
 - **Fix**: Add explanation in parentheses at first use, or spell out the acronym.
 - **Files**: `DESCRIPTION`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### DESC-08: Must Use Authors@R Field
 
@@ -78,6 +85,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Check for presence of `Authors@R` field. Check for deprecated `Author` and `Maintainer` fields used alone.
 - **Fix**: Convert to `Authors@R` with proper `person()` entries including roles (aut, cre, cph, ctb).
 - **Files**: `DESCRIPTION`
+- **Since**: ~2016-2017 — Authors@R field preferred since CRAN policy revisions r3747-r3874
 
 ### DESC-09: Must Include Copyright Holder (cph)
 
@@ -86,6 +94,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Parse Authors@R field, check for presence of `"cph"` role.
 - **Fix**: Add `"cph"` role to the appropriate person(s).
 - **Files**: `DESCRIPTION`
+- **Since**: ~2016-2017 — cph role requirement added during CRAN policy revisions r3747-r3874
 
 ### DESC-10: Unnecessary "+ file LICENSE"
 
@@ -95,6 +104,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Check License field for `+ file LICENSE` combined with licenses that don't require it (GPL-2, GPL-3, LGPL-2.1, LGPL-3, Apache-2.0).
 - **Fix**: Remove `+ file LICENSE` and the LICENSE file for standard licenses. Keep for MIT, BSD-2-clause, BSD-3-clause.
 - **Files**: `DESCRIPTION`, `LICENSE`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### DESC-11: Single Maintainer Required
 
@@ -103,6 +113,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Parse Authors@R, count entries with `"cre"` role. Verify it's exactly 1. Check email looks like a person (not a list address).
 - **Fix**: Ensure exactly one `cre` entry with a personal email.
 - **Files**: `DESCRIPTION`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### DESC-12: Version Must Increase
 
@@ -151,6 +162,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep R files for `\bT\b` and `\bF\b` used as logical values (not inside strings, not as function params named T/F). Context-aware: look for `= T`, `= F`, `(T)`, `(F)`, `, T`, `, F`.
 - **Fix**: Replace `T` with `TRUE`, `F` with `FALSE`. Rename variables named T or F.
 - **Files**: `R/*.R`, `tests/**/*.R`, `vignettes/*.Rmd`
+- **Since**: Pre-2015 — one of the oldest and most consistently enforced CRAN rules
 
 ### CODE-02: Use message()/warning()/stop(), Not print()/cat()
 
@@ -161,6 +173,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Replace `cat("Processing...\n")` with `message("Processing...")`. Replace `print(paste("Done:", x))` with `message("Done: ", x)`.
 - **Exceptions**: print/summary methods, interactive functions, if(verbose) cat() pattern.
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-03: No Hardcoded set.seed() in Functions
 
@@ -170,6 +183,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find `set.seed(` inside function bodies in R/ directory. Distinguish from examples/tests/vignettes.
 - **Fix**: Remove the hardcoded seed, or add a `seed` parameter that defaults to NULL (only set when user provides one).
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-04: Restore options()/par()/setwd() with on.exit()
 
@@ -183,6 +197,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
   on.exit(options(old), add = TRUE)
   ```
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-05: Never Use options(warn = -1)
 
@@ -192,6 +207,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep for `options(warn\s*=\s*-1)` or `options(warn\s*=\s*-\s*1)`.
 - **Fix**: Replace `options(warn = -1); ...; on.exit(options(old))` with `suppressWarnings({ ... })`.
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-06: Write Only to tempdir()
 
@@ -199,8 +215,9 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Rule**: Must not write to user's home directory, working directory, or package directory. Only `tempdir()` and `tempfile()` are allowed for temporary files. For persistent user data, use `tools::R_user_dir()` (R >= 4.0) with user consent.
 - **CRAN says**: "Please ensure that your functions do not write by default or in your examples/vignettes/tests in the user's home filespace (including the package directory and getwd()). This is not allowed by CRAN policies."
 - **Detection**: Find `write*`, `save*`, `writeLines`, `cat(file=`, `sink(`, `pdf(`, `png(`, etc. where the path is not derived from `tempdir()`, `tempfile()`, or `R_user_dir()`. Look for hardcoded paths, `getwd()`, `~`, `"."`.
-- **Fix**: Replace file paths with `tempfile()` or `file.path(tempdir(), "name")`. For user data, use `tools::R_user_dir("pkgname", which = "data")`.
+- **Fix**: Replace file paths with `tempfile()` or `file.path(tempdir(), "name")`. For user data, use `tools::R_user_dir("pkgname", which = "data")` (R >= 4.0).
 - **Files**: `R/*.R`, `tests/**/*.R`, `vignettes/*.Rmd`
+- **Since**: Pre-2015 — consistently enforced; R 4.0.0 (2020) introduced `tools::R_user_dir()` as the sanctioned persistent storage alternative; CRAN enforced migration from `rappdirs` in late 2021
 
 ### CODE-07: Clean Up Temporary Files
 
@@ -219,6 +236,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep for `installed.packages(`.
 - **Fix**: Replace with `requireNamespace("pkg", quietly = TRUE)`, `find.package("pkg")`, or `system.file(package = "pkg")`.
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-09: No Modifying .GlobalEnv
 
@@ -229,6 +247,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Use local environments, return values, or package-level environments instead of `<<-`.
 - **Exceptions**: Shiny reactive assignments.
 - **Files**: `R/*.R`, `man/*.Rd`, `vignettes/*.Rmd`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-10: Maximum 2 Cores
 
@@ -238,6 +257,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find `parallel::detectCores()`, `makeCluster(`, `mclapply(`, `future::plan(multisession`, etc. Check if core count is hardcoded > 2 or uses `detectCores()` without `min(..., 2)`.
 - **Fix**: Cap cores: `ncores <- min(parallel::detectCores(), 2)`. Or use `getOption("mc.cores", 2L)`.
 - **Files**: `R/*.R`, `tests/**/*.R`, `vignettes/*.Rmd`, `man/*.Rd`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-11: No q(), quit(), or Process Termination
 
@@ -246,6 +266,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep R files for `\bq\(`, `\bquit\(`. Grep C/C++ for `abort(`, `exit(`, `assert(`. Grep Fortran for `STOP`.
 - **Fix**: Use `stop()` to signal errors in R. In C, use `Rf_error()`.
 - **Files**: `R/*.R`, `src/*.c`, `src/*.cpp`, `src/*.f`, `src/*.f90`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-12: No :::  to Internal Base Functions
 
@@ -254,6 +275,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep for `:::\s*` where the package is a base/recommended package (base, utils, stats, methods, grDevices, graphics, datasets, tools, compiler). Also grep for `.Internal(`.
 - **Fix**: Use public API alternatives. If none exists, file an R wish-list request.
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — CRAN policy long stated "CRAN packages should use only the public API"; automated non-API checking expanded progressively from R 4.3+ (2023)
 
 ### CODE-13: No Installing Packages in Functions
 
@@ -263,6 +285,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find `install.packages(`, `remotes::install_`, `devtools::install_` in R source (not in functions whose explicit purpose is installation).
 - **Fix**: Remove installation calls. Use `requireNamespace()` to check availability instead.
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### CODE-14: No Disabling SSL/TLS Verification
 
@@ -308,6 +331,46 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Fix the underlying test failures. If test coverage increased, present covr evidence.
 - **Files**: `tests/**/*.R`
 
+### CODE-19: Staged Installation Compatibility
+
+- **Severity**: REJECTION
+- **Rule**: Packages must not cache absolute paths at install time or namespace load time. R 3.6.0 introduced staged installation as the default: packages are first installed to a temporary directory, then moved to the final library location. Code that calls `system.file()` at the top level of an R source file and saves the result will cache the temporary path, which breaks after the move.
+- **CRAN says**: "ERROR: installation of package 'PKGNAME' had non-zero exit status" (with paths pointing to the temporary staging directory)
+- **Detection**: Find top-level `system.file()` calls in R source files that are assigned to variables outside of function bodies. Check `.onLoad()` for path caching via `system.file()` saved to package-level variables.
+- **Fix**: Replace cached paths with function calls that compute paths at runtime. Instead of `globals$DB_PATH <- system.file(...)` at top level, use a function: `getDbPath <- function() system.file(...)`. Packages can opt out temporarily via `StagedInstall: no` in DESCRIPTION, but CRAN discourages this.
+- **Files**: `R/*.R`, `DESCRIPTION`
+- **Since**: R 3.6.0 (2019) — staged installation enabled by default; initially broke 48 CRAN/Bioconductor packages
+
+### CODE-20: stringsAsFactors=FALSE Default Compatibility
+
+- **Severity**: WARNING
+- **Rule**: Since R 4.0.0, `data.frame()` and `read.table()` default to `stringsAsFactors = FALSE`. Code that relies on strings being automatically converted to factors will silently produce wrong results. This includes downstream computations on factor levels and sort orders that depended on locale-dependent factor conversion.
+- **CRAN says**: Test failures or incorrect results on R >= 4.0.0 due to character columns where factors were expected.
+- **Detection**: Search for `data.frame()` and `read.table()` calls without explicit `stringsAsFactors=` argument where downstream code uses `levels()`, `nlevels()`, or factor-specific operations. Flag `is.factor()` checks on columns that may now be character.
+- **Fix**: Add explicit `stringsAsFactors = TRUE` where factor behavior is needed, or update code to work with character vectors. Use `factor()` explicitly when factor type is required.
+- **Files**: `R/*.R`, `tests/**/*.R`
+- **Since**: R 4.0.0 (2020) — reversed 22 years of default behavior (since R 0.62, 1998); broke a large number of packages
+
+### CODE-21: class(matrix()) Returns Two-Element Vector
+
+- **Severity**: WARNING
+- **Rule**: Since R 4.0.0, `class(matrix())` returns `c("matrix", "array")` instead of just `"matrix"`. Code using `class(x) == "matrix"` will silently fail because `==` against a length-2 vector no longer yields a single TRUE/FALSE.
+- **CRAN says**: "the condition has length > 1 and only the first element will be used" (interacts with CODE-22)
+- **Detection**: Grep R source and test files for patterns like `class(x) == "matrix"`, `class(x) == "array"`, `length(class(x)) == 1`. Also flag `class(x) ==` comparisons generally, as other classes may gain inheritance in future R versions.
+- **Fix**: Use `is.matrix()` or `inherits(x, "matrix")` instead of `class(x) == "matrix"`. Use `is()` or `inherits()` for all class checks.
+- **Files**: `R/*.R`, `tests/**/*.R`
+- **Since**: R 4.0.0 (2020) — matrices now inherit from "array" class
+
+### CODE-22: if()/while() Condition Length > 1 Is an Error
+
+- **Severity**: REJECTION
+- **Rule**: Since R 4.2.0, using a vector of length > 1 as a condition in `if()` or `while()` is a runtime error (previously a warning since R 2.x). Additionally, `&&` and `||` with either argument of length > 1 gives a warning (intended to become error later).
+- **CRAN says**: "Error in if (c(TRUE, FALSE)) { : the condition has length > 1"
+- **Detection**: Static analysis of `if()` and `while()` conditions for expressions that may produce multi-element results: `class(x) == "something"`, vector comparisons without `any()`/`all()`, `which()` results used as conditions.
+- **Fix**: Use `any()`, `all()`, or ensure conditions are scalar. Replace `if (class(x) == "matrix")` with `if (inherits(x, "matrix"))`. Replace `if (x == y)` with `if (identical(x, y))` or `if (all(x == y))` where appropriate.
+- **Files**: `R/*.R`
+- **Since**: R 4.2.0 (2022) — upgraded from WARNING to ERROR; CRAN gave deadline of 2022-04-04 for packages to comply before R 4.2.0 release
+
 ---
 
 ## Category: Compiled Code (C/C++/Fortran)
@@ -347,6 +410,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Difficult to detect statically without compiling. Flag if `src/` exists with .c files as informational reminder.
 - **Fix**: Add proper `#include` directives for all used functions. Add function prototypes.
 - **Files**: `src/*.c`
+- **Since**: R 4.2.0 (2022) — `_R_CHECK_SRC_MINUS_W_IMPLICIT_` defaults to true; Apple clang on macOS made this an error rather than warning
 
 ### COMP-05: Configure Script Portability
 
@@ -356,6 +420,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Check configure, cleanup scripts for `#!/bin/bash` shebang. Grep for bashisms: `[[`, `]]`, `${var/`, `${var:`, arrays, `source` (use `.` instead).
 - **Fix**: Change shebang to `#!/bin/sh`. Replace bashisms with POSIX equivalents.
 - **Files**: `configure`, `cleanup`, `tools/*`
+- **Since**: Pre-2015 for `/bin/bash` detection; R 4.0.0 (2020) added optional `checkbashisms` check; R 4.5+ expanded to autoconf-generated scripts
 
 ### COMP-06: C++11/C++14 Specifications Deprecated
 
@@ -393,6 +458,36 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Run `cargo vendor` and commit the vendor directory. Add configure script that runs `rustc --version`. Create AUTHORS file from `Cargo.toml` contributor fields.
 - **Files**: `src/rust/`, `Cargo.toml`, `configure`, `AUTHORS`
 
+### COMP-10: Native Routine Registration Required
+
+- **Severity**: NOTE → WARNING
+- **Rule**: Packages using `.C()`, `.Call()`, `.Fortran()`, or `.External()` interfaces must register all native routines via `R_registerRoutines()` and disable symbol search via `R_useDynamicSymbols()` in a `src/init.c` file. The NAMESPACE must use `useDynLib(pkgname, .registration = TRUE)`.
+- **CRAN says**: "Found no calls to: 'R_registerRoutines', 'R_useDynamicSymbols'. It is good practice to register native routines and to disable symbol search."
+- **Detection**: Check if `src/` exists with `.c`, `.cpp`, `.f`, or `.f90` files. Grep R source files for `.C(`, `.Call(`, `.Fortran(`, `.External(`. If found, check for `src/init.c` (or equivalent) containing `R_registerRoutines`. Check NAMESPACE for `useDynLib(pkgname, .registration = TRUE)`.
+- **Fix**: Generate registration code with `tools::package_native_routine_registration_skeleton(".", "src/init.c")`. Update NAMESPACE to `useDynLib(pkgname, .registration = TRUE)`. For Rcpp packages, Rcpp >= 0.12.12 handles this automatically.
+- **Files**: `src/init.c`, `NAMESPACE`, `R/*.R`
+- **Since**: R 3.4.0 (2017) — introduced as NOTE; one of the most impactful changes for packages with compiled code; affected thousands of packages
+
+### COMP-11: Memory Sanitizer (ASAN/UBSAN/Valgrind) Compliance
+
+- **Severity**: NOTE → REJECTION
+- **Rule**: CRAN runs additional checks beyond standard R CMD check using AddressSanitizer (ASAN), Undefined Behavior Sanitizer (UBSAN), and valgrind. Packages with compiled code that trigger memory errors (buffer overflows, use-after-free, uninitialized memory reads, undefined behavior) in these additional checks will be flagged for correction with short deadlines (sometimes 1-2 weeks).
+- **CRAN says**: "==ERROR: AddressSanitizer: stack-buffer-overflow" / "runtime error: undefined behavior" / "Conditional jump or move depends on uninitialised value(s)"
+- **Detection**: Cannot detect statically. Packages with C/C++/Fortran code should be tested locally with sanitizers before submission. Use Docker images with R compiled with ASAN/UBSAN (e.g., `rocker/r-devel-san`), or use rhub's sanitizer-enabled platforms.
+- **Fix**: Fix memory errors identified by sanitizer output. Common fixes: bounds checking on array access, initializing all variables, fixing use-after-free by managing object lifetimes, removing undefined behavior (signed integer overflow, null pointer dereference).
+- **Files**: `src/*.c`, `src/*.cpp`, `src/*.f`, `src/*.f90`
+- **Since**: ~2016-2017 — ASAN/UBSAN checks expanded on CRAN's Fedora and Debian check flavors; packages can pass standard R CMD check on all platforms but still fail these additional checks
+
+### COMP-12: UCRT Windows Toolchain Compatibility
+
+- **Severity**: REJECTION (on Windows)
+- **Rule**: Since R 4.2.0, Windows uses UCRT (Universal C Runtime) exclusively via Rtools42+, dropping 32-bit support and MSVCRT. Packages must not download pre-compiled MSVCRT libraries at install time. External DLLs must be compatible with UCRT. Encoding behavior changed to UTF-8 on Windows.
+- **CRAN says**: Compilation or linking failures on `r-devel-windows-x86_64` or `r-release-windows-x86_64` platforms.
+- **Detection**: Check if package downloads pre-compiled Windows binaries at install time (grep configure.win and src/Makevars.win for `download.file`, `curl`, or `wget` calls). Check for `Makevars.ucrt` file if platform-specific build configuration is needed.
+- **Fix**: Use libraries bundled with Rtools42+ instead of downloading external pre-compiled binaries. Add `Makevars.ucrt` if different build flags are needed for UCRT. Test on win-builder with R-devel before submitting.
+- **Files**: `src/Makevars.win`, `src/Makevars.ucrt`, `configure.win`
+- **Since**: R 4.2.0 (2022) — UCRT became the only Windows target; ~380 packages initially affected; CRAN switched incoming Windows checks to UCRT in December 2021
+
 ---
 
 ## Category: Documentation
@@ -405,6 +500,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Parse R files for `@export` without corresponding `@return`. Parse .Rd files for missing `\value{}` sections. Data set docs (`\docType{data}`) are exempt.
 - **Fix**: Add `@return` describing the class and meaning of the return value. For side-effect functions: `@return No return value, called for side effects`.
 - **Files**: `R/*.R`, `man/*.Rd`
+- **Since**: Pre-2015 — one of the most common rejection reasons for first-time submissions across all studied periods
 
 ### DOC-02: Don't Use \dontrun{} Unless Truly Non-Executable
 
@@ -414,6 +510,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find `\dontrun{` in .Rd files or `@examples` sections. Flag all instances for review. Auto-classify based on content (network calls vs. pure computation).
 - **Fix**: Replace `\dontrun{}` with `\donttest{}` for slow examples. Use `if (interactive()) {}` for interactive code. Only keep `\dontrun{}` for truly non-executable code with a comment explaining why.
 - **Files**: `R/*.R`, `man/*.Rd`
+- **Since**: Pre-2015 — consistently enforced; note that R 4.0.0 (2020) changed `R CMD check --as-cran` to actually run `\donttest{}` examples, making the distinction between `\dontrun` and `\donttest` critical
 
 ### DOC-03: Examples Must Be Fast (< 5 seconds each)
 
@@ -422,6 +519,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Cannot fully detect statically — flag examples that involve file I/O, network requests, large computations, or loops with high iteration counts. Flag if `\donttest{}` is not used.
 - **Fix**: Reduce iterations, use toy datasets, precompute results, wrap slow code in `\donttest{}`.
 - **Files**: `R/*.R`, `man/*.Rd`
+- **Since**: Pre-2015 — consistently enforced; more impactful since R 4.0.0 (2020) which runs `\donttest{}` examples under `--as-cran`
 
 ### DOC-04: Changes Must Go in .R Files, Not .Rd Files (if using roxygen2)
 
@@ -440,6 +538,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find exported functions without `@examples`. Find functions where ALL examples are wrapped.
 - **Fix**: Add short, fast examples that demonstrate basic usage. Keep at least one unwrapped example per function.
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
 ### DOC-06: Function Names Must Include Parentheses in Docs
 
@@ -456,6 +555,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find non-canonical CRAN URLs (e.g., `cran.r-project.org/web/packages/...`).
 - **Fix**: Replace with canonical form.
 - **Files**: `R/*.R`, `man/*.Rd`, `DESCRIPTION`, `vignettes/*.Rmd`
+- **Since**: R 3.2.0 (2015) — URL accessibility checking introduced; canonical CRAN URL enforcement tightened ~2019
 
 ### DOC-08: Lost Braces in Rd Documentation
 
@@ -472,8 +572,29 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Rule**: R 4.4+ validates Rd-generated HTML against HTML5 spec. Rd files producing elements removed from HTML5 (like `<font>`, `<center>`, `<strike>`) are flagged.
 - **CRAN says**: NOTE about HTML validation issues in rendered help pages.
 - **Detection**: Check man/*.Rd for raw HTML that uses deprecated HTML5 elements.
-- **Fix**: Remove deprecated HTML elements from Rd files. Use standard Rd formatting macros instead.
+- **Fix**: Remove deprecated HTML elements from Rd files. Use standard Rd formatting macros instead. Update roxygen2 to >= 7.2.1 and re-document.
 - **Files**: `man/*.Rd`, `R/*.R`
+- **Since**: R 4.2.0 (2022) — HTML5 validation added to `--as-cran` checks via `_R_CHECK_RD_VALIDATE_RD2HTML_`; enforcement wave with deadline 2022-09-01
+
+### DOC-10: \donttest Examples Now Executed Under --as-cran
+
+- **Severity**: REJECTION
+- **Rule**: Since R 4.0.0, `R CMD check --as-cran` actually runs `\donttest{}` examples rather than merely instructing the tester to do so. This means code wrapped in `\donttest{}` must be correct, must not require credentials or special hardware, and must complete within CRAN's time limits. Examples that were "safe" in `\donttest{}` before R 4.0.0 may now cause check failures.
+- **CRAN says**: "* checking examples ... [30s] ERROR. Running examples in 'package-Ex.R' failed"
+- **Detection**: Find `\donttest{}` blocks in .Rd files or `@examples` sections. Flag examples that: contain network calls without error handling, use credentials/API keys, perform slow computations (especially plot functions like `spplot()`), or depend on non-CRAN resources. Check if examples inside `\donttest{}` would complete in < 10 seconds on slow hardware.
+- **Fix**: Move truly non-runnable examples to `\dontrun{}` with a comment explaining why. Ensure `\donttest{}` examples handle failures gracefully. Add error handling around network calls. Reduce computation in plot examples. Test timing on CRAN-like hardware (roughly 2x slower than typical dev machines).
+- **Files**: `R/*.R`, `man/*.Rd`
+- **Since**: R 4.0.0 (2020) — `\donttest{}` examples now run by `--as-cran`; can be temporarily disabled via `_R_CHECK_DONTTEST_EXAMPLES_=false`
+
+### DOC-11: Duplicated Vignette Titles
+
+- **Severity**: NOTE
+- **Rule**: Each vignette must have a unique title (VignetteIndexEntry). Duplicated titles cause issues because they are used as hyperlinks on CRAN package pages.
+- **CRAN says**: R CMD check NOTE about duplicated vignette titles/index entries.
+- **Detection**: Parse all vignette files in `vignettes/` for `%\VignetteIndexEntry{}` declarations. Flag any duplicated values.
+- **Fix**: Give each vignette a unique, descriptive title in its `%\VignetteIndexEntry{}` metadata.
+- **Files**: `vignettes/*.Rmd`, `vignettes/*.Rnw`
+- **Since**: R 3.6.0 (2019) — R CMD check began checking for duplicated vignette titles
 
 ---
 
@@ -515,6 +636,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Check file sizes. Identify large files (data, vignette images, bundled libraries).
 - **Fix**: Compress data more aggressively. Move large datasets to separate data-only package. Reduce vignette image resolution. Remove unnecessary bundled files.
 - **Files**: Entire package
+- **Since**: Pre-2015 — original limit was 5MB (tarball, data, and documentation each); tarball limit raised to 10MB in November 2025
 
 ### SIZE-02: Check Time Must Be < 10 Minutes
 
@@ -523,6 +645,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Run `R CMD check --as-cran` and check timing output. Flag if > 5 minutes (safety margin).
 - **Fix**: Reduce test/example/vignette runtime. Use `\donttest{}` for slow examples. Skip slow tests conditionally. Use precomputed vignettes.
 - **Files**: `tests/**/*.R`, `R/*.R`, `vignettes/*.Rmd`
+- **Since**: Pre-2015 — consistently enforced; R 3.5.0 (2018) added configurable check timeouts via environment variables
 
 ---
 
@@ -535,6 +658,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Check for platform-specific code (system calls, file paths with backslashes, Windows-specific APIs). Check SystemRequirements field.
 - **Fix**: Use cross-platform R functions. Conditional platform-specific code with `.Platform$OS.type`.
 - **Files**: `R/*.R`, `src/*`, `DESCRIPTION`
+- **Since**: Pre-2015 — consistently enforced; Solaris checks were particularly problematic during 2015-2019 before Solaris was dropped from CRAN check flavors
 
 ### PLAT-02: No Binary Executables in Source Package
 
@@ -563,6 +687,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find `library(pkg)` or `pkg::func()` for Suggests packages without conditional wrapping.
 - **Fix**: Wrap in `if (requireNamespace("pkg", quietly = TRUE)) { ... }`.
 - **Files**: `R/*.R`, `tests/**/*.R`, `vignettes/*.Rmd`
+- **Since**: Pre-2015 — enforcement tightened significantly in R 3.4.0 (2017) when `_R_CHECK_SUGGESTS_ONLY_` and `_R_CHECK_DEPENDS_ONLY_` were applied to vignette re-building
 
 ### DEP-03: Monitor Dependency Health
 
@@ -584,6 +709,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Find URL requests (httr, curl, download.file). Check if wrapped in tryCatch or similar error handling.
 - **Fix**: Wrap all network calls in `tryCatch()`. Return informative error messages. Use `\donttest{}` for examples requiring network. **Important (R 4.5+ enforcement):** Graceful failure must extend to ALL downstream code in examples and vignettes, not just the network-calling function itself. If `read_data()` returns NULL on failure, any vignette code that uses the result must also handle the NULL case gracefully.
 - **Files**: `R/*.R`
+- **Since**: Pre-2015 — CRAN policy has long required graceful failure; enforcement intensified 2020-2022 with tighter deadlines and faster archival
 
 ### NET-02: Must Use HTTPS
 
@@ -592,6 +718,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep for `http://` URLs (excluding localhost).
 - **Fix**: Replace `http://` with `https://`.
 - **Files**: `R/*.R`, `man/*.Rd`, `DESCRIPTION`, `vignettes/*.Rmd`, `README.md`
+- **Since**: R 3.2.0 (2015) — URL checking introduced; HTTPS preference formalized ~2017-2019 policy; `ftps` removed as acceptable in 2023, leaving only `https`
 
 ### NET-03: Rate Limit Policy
 
@@ -690,8 +817,9 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Severity**: NOTE
 - **Rule**: All URLs in package files must resolve (no 404s, redirects should be updated to final URL).
 - **Detection**: Run `urlchecker::url_check()`.
-- **Fix**: Update or remove broken URLs.
+- **Fix**: Update or remove broken URLs. CRAN does not tolerate permanent redirections (301s) — update to the final URL directly.
 - **Files**: All text files
+- **Since**: R 3.2.0 (2015) — URL accessibility checking introduced; enhanced with `tools::check_package_urls()` in R 4.2.0 (2022)
 
 ### MISC-03: Spelling Should Be Correct
 
@@ -717,6 +845,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Grep src/Makevars for GNU make extensions. Check if SystemRequirements includes "GNU make".
 - **Fix**: Either use only POSIX make features, or add `SystemRequirements: GNU make` to DESCRIPTION.
 - **Files**: `src/Makevars`, `src/Makevars.win`, `DESCRIPTION`
+- **Since**: R 3.3.0 (2016) — GNU extension detection in Makefiles added to R CMD check
 
 ### MISC-06: NEWS File Format Validation
 
@@ -726,6 +855,16 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: If NEWS.md exists, check that version headings match pattern `# package version` or `# package version (date)`. Check that versions are valid R version strings.
 - **Fix**: Use standard format: `# packagename 1.2.3` or `# packagename 1.2.3 (2024-01-15)`. Use `usethis::use_news_md()` for template.
 - **Files**: `NEWS.md`, `NEWS`
+
+### MISC-07: URL Permanent Redirects Not Tolerated
+
+- **Severity**: NOTE → REJECTION
+- **Rule**: CRAN does not tolerate permanent URL redirections (HTTP 301). URLs in DESCRIPTION, CITATION, README, vignettes, and Rd files must point to their final destination directly. HTTP-to-HTTPS redirects, www/non-www redirects, and domain migration redirects all trigger NOTEs. DOI redirects are exempt (DOIs always redirect).
+- **CRAN says**: "Found the following (possibly) invalid URLs: URL: http://example.com From: DESCRIPTION Status: 301 Message: Moved Permanently"
+- **Detection**: Check all URLs in package files. For each URL, verify it does not return a 301 redirect status. Specifically flag: `http://` URLs where the HTTPS version exists, URLs to domains known to have migrated, URLs with `www.` when the non-www version is canonical (or vice versa). DOI URLs (`https://doi.org/...`) are exempt.
+- **Fix**: Update all URLs to their final destination. Replace `http://` with `https://` where the site supports it. Use the `urlchecker` package to validate all URLs before submission: `urlchecker::url_check()`.
+- **Files**: `DESCRIPTION`, `man/*.Rd`, `vignettes/*.Rmd`, `README.md`, `inst/CITATION`
+- **Since**: R 3.2.0 (2015) — URL accessibility checking introduced; redirect intolerance tightened progressively through R 4.0+ (2020) with enhanced parallel URL checking
 
 ---
 
@@ -815,6 +954,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Parse DESCRIPTION for `VignetteBuilder` field. Scan `vignettes/*.Rmd` and `vignettes/*.Rnw` for `%\VignetteEngine{...}` declarations. If vignettes use `knitr::rmarkdown`, verify both `knitr` and `rmarkdown` appear in VignetteBuilder and in Suggests/Imports. If vignettes exist but no VignetteBuilder is declared, flag.
 - **Fix**: Add `VignetteBuilder: knitr` (or `knitr, rmarkdown`) to DESCRIPTION. Add both packages to Suggests.
 - **Files**: `DESCRIPTION`, `vignettes/*.Rmd`, `vignettes/*.Rnw`
+- **Since**: Pre-2015 — VignetteBuilder requirement consistently enforced; the specific requirement for both knitr AND rmarkdown in VignetteBuilder became common around 2015-2017
 
 ### VIG-02: Missing VignetteEngine/VignetteIndexEntry/VignetteEncoding Metadata
 
@@ -936,6 +1076,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Requires R-level analysis. Partial detection: check that packages in DESCRIPTION `Imports:` have corresponding `importFrom()` or `import()` in NAMESPACE (if not, they may rely on `::` syntax, which is valid but worth verifying).
 - **Fix**: For each function from another package, either use `pkg::fun()` syntax in code, or add `importFrom(pkg, fun)` to NAMESPACE / `@importFrom pkg fun` in roxygen2. For non-standard evaluation variables (e.g., dplyr column names), use `.data$col` or `utils::globalVariables()`.
 - **Files**: `NAMESPACE`, `R/*.R`
+- **Since**: R 3.3.0 (2016) — code usage checking with codetools now runs with only base package attached; functions from non-base default packages (stats, utils, graphics) must be explicitly imported
 
 ### NS-07: Re-Export Documentation Requirements
 
@@ -945,6 +1086,16 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Parse NAMESPACE for patterns where a function is both `importFrom()`-ed and `export()`-ed (suggesting re-export). Check that corresponding .Rd documentation exists.
 - **Fix**: Use roxygen2's `@importFrom pkg fun` + `@export` pattern, which generates proper re-export documentation. Or create a `R/reexports.R` file with roxygen2 blocks for re-exported objects.
 - **Files**: `NAMESPACE`, `man/*.Rd`
+
+### NS-08: No library()/require() in Package Code
+
+- **Severity**: NOTE → REJECTION
+- **Rule**: Package code in `R/*.R` must not use `library()` or `require()` to load other packages. These modify the search path and create fragile implicit dependencies. Instead, use namespace imports (`importFrom()` in NAMESPACE) or the `pkg::func()` calling convention.
+- **CRAN says**: R CMD check NOTE: "library() or require() call not declared from: 'pkgname'" / "library() or require() calls in package code"
+- **Detection**: Grep `R/*.R` files for `library(` and `require(` calls that are not inside `if (interactive())` blocks or conditional checks. Distinguish from `requireNamespace()` which is correct.
+- **Fix**: Replace `library(pkg)` with proper NAMESPACE imports: add `importFrom(pkg, func)` to NAMESPACE (or `@importFrom pkg func` in roxygen2). Or use `pkg::func()` syntax. Use `requireNamespace("pkg", quietly = TRUE)` for conditional availability checks.
+- **Files**: `R/*.R`, `NAMESPACE`
+- **Since**: R 3.2.0 (2015) — R CMD check began noting `library()`/`require()` in package code; combined with R 3.3.0 (2016) codetools enforcement of explicit imports
 
 ---
 
@@ -979,6 +1130,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Parse DESCRIPTION for `LazyData: true` (or `yes`). Check if `data/` directory exists.
 - **Fix**: Remove `LazyData: true` from DESCRIPTION if no `data/` directory exists.
 - **Files**: `DESCRIPTION`
+- **Since**: R 4.1.0 (2021) — LazyData sanity checks introduced; R CMD build began removing unnecessary LazyData fields
 
 ### DATA-03: Missing LazyData When data/ Has .rda Files
 
@@ -1024,6 +1176,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Read first bytes of `.rda` files to detect `RDA3`/`RDX3` magic bytes. If found and DESCRIPTION does not declare `Depends: R (>= 3.5.0)` or higher, flag it.
 - **Fix**: Re-save data with `version = 2`: `save(data, file = "data/mydata.rda", version = 2)`, or add `Depends: R (>= 3.5.0)` to DESCRIPTION.
 - **Files**: `DESCRIPTION`, `data/*.rda`
+- **Since**: R 3.5.0 (2018) — serialization format v3 introduced; R 3.6.0 (2019) made format v3 the default, causing silent dependency bumps for packages rebuilt with R >= 3.6
 
 ### DATA-08: Internal sysdata.rda Size
 
