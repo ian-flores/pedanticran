@@ -5,7 +5,7 @@
 > **Warning**
 > This project is experimental. Rules may be incomplete, checks may have false positives, and the API may change without notice. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
 
-**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 130 CRAN rules (compiled from 3 years of mailing list rejections) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
+**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 141 CRAN rules (compiled from a decade of mailing list rejections, 2015–2025) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
 
 Works as a **Claude Code plugin** (interactive) or a **GitHub Action** (CI).
 
@@ -67,14 +67,14 @@ Then in Claude Code, inside your R package directory:
 
 ## What it checks
 
-130 rules across 19 categories, sourced from 3 years (2023–2025) of CRAN mailing list rejections and policy revisions:
+141 rules across 19 categories, sourced from a decade (2015–2025) of CRAN mailing list rejections, policy revisions, and R release notes:
 
 | Category | Rules | Examples |
 |----------|------:|---------|
 | DESCRIPTION | 15 | Title case, quoting software names, valid Authors@R, license format, stale Date field, smart quotes |
-| Code Behavior | 18 | T/F literals, print→message, options/par without on.exit, seed in functions, browser() calls, sprintf deprecation |
-| Compiled Code | 9 | C23 keywords, R_NO_REMAP, non-API entry points, strict prototypes, Fortran KIND, Rust vendoring |
-| Documentation | 9 | Missing @return, \dontrun misuse, lost braces (R 4.3+), HTML5 Rd validation |
+| Code Behavior | 22 | T/F literals, print→message, options/par without on.exit, staged install paths, stringsAsFactors, class(matrix()), if-condition length |
+| Compiled Code | 12 | C23 keywords, R_NO_REMAP, native routine registration, ASAN/UBSAN compliance, UCRT toolchain, Rust vendoring |
+| Documentation | 11 | Missing @return, \dontrun misuse, \donttest execution under --as-cran, lost braces (R 4.3+), HTML5 Rd validation |
 | Licensing | 3 | License validity, license changes, dual licensing prohibition |
 | Size & Performance | 2 | Tarball size (10MB), check time (10 min) |
 | Cross-Platform | 2 | Multi-platform support, no binary executables |
@@ -82,10 +82,10 @@ Then in Claude Code, inside your R package directory:
 | Internet | 3 | Graceful failure, HTTPS, rate limit policy (rev6277) |
 | Submission | 7 | R CMD check, multi-platform testing, reverse deps, vacation periods |
 | Package Naming | 2 | Case-insensitive uniqueness, permanence |
-| Miscellaneous | 6 | NEWS format, URL validity, spelling, .Rbuildignore, Makefile portability |
+| Miscellaneous | 7 | NEWS format, URL validity, URL redirect intolerance, spelling, .Rbuildignore, Makefile portability |
 | Encoding | 8 | Missing Encoding field, non-ASCII in R source, BOM detection, \x escape sequences |
 | Vignettes | 8 | VignetteBuilder declaration, metadata, stale inst/doc, build dependencies, html_document size |
-| NAMESPACE | 7 | Import conflicts, importFrom preference, S3 method registration, broad exportPattern, Depends misuse |
+| NAMESPACE | 8 | Import conflicts, importFrom preference, S3 method registration, broad exportPattern, Depends misuse, no library() in package code |
 | Data | 9 | Undocumented datasets, LazyData configuration, compression, size limits, invalid formats |
 | System Requirements | 7 | Undeclared system libraries, external programs, C++ standard consistency, Java source requirements |
 | Maintainer Email | 6 | Mailing list detection, disposable domains, placeholder addresses, noreply patterns |
@@ -129,7 +129,7 @@ Paste your rejection email. pedanticran:
 
 ## How it complements R CMD check and devtools
 
-pedanticran is not a replacement for `R CMD check` — it catches what `R CMD check` misses. Of 130 rules, many are unique to pedanticran and checked by no other automated tool in the R ecosystem.
+pedanticran is not a replacement for `R CMD check` — it catches what `R CMD check` misses. Of 141 rules, many are unique to pedanticran and checked by no other automated tool in the R ecosystem.
 
 `devtools::check()` is a convenience wrapper around `R CMD check` — it adds zero additional policy checks. `goodpractice` covers about 10–15% of pedanticran's unique rules. The full gap analysis is in [`research/devtools-comparison.md`](research/devtools-comparison.md).
 
