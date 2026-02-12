@@ -12,7 +12,12 @@ import argparse
 import datetime
 import os
 import re
+import shutil
+import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1742,6 +1747,29 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                     cran_says="Packages in Suggests should be used conditionally."
                 ))
 
+    # CODE-20: stringsAsFactors Compatibility (heuristic)
+    for rf in r_files:
+        rel = str(rf.relative_to(path))
+        try:
+            full_text_20 = rf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        has_data_frame = bool(re.search(r'\bdata\.frame\s*\(', full_text_20))
+        has_strings_as_factors = bool(re.search(r'\bstringsAsFactors\b', full_text_20))
+        has_factor_usage = bool(
+            re.search(r'\blevels\s*\(', full_text_20)
+            or re.search(r'\bas\.factor\s*\(', full_text_20)
+            or re.search(r'\bnlevels\s*\(', full_text_20)
+        )
+        if has_data_frame and not has_strings_as_factors and has_factor_usage:
+            findings.append(Finding(
+                rule_id="CODE-20", severity="note",
+                title="Possible stringsAsFactors assumption",
+                message="File uses data.frame() and factor functions (levels/as.factor/nlevels) but never mentions stringsAsFactors. Since R 4.0, stringsAsFactors defaults to FALSE.",
+                file=rel,
+                cran_says="stringsAsFactors default changed in R 4.0.0"
+            ))
+
     # NET-01: Must Fail Gracefully When Resources Unavailable
     network_call_patterns = [
         (r'\bdownload\.file\s*\(', 'download.file()'),
@@ -1780,6 +1808,149 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
             else:
                 continue
             break  # One finding per file is enough
+
+    # COMP-04: Implicit Function Declarations (heuristic)
+    # Check C files for common stdlib functions without corresponding headers
+    _stdlib_header_map = {
+        "malloc": "stdlib.h", "calloc": "stdlib.h", "realloc": "stdlib.h",
+        "free": "stdlib.h", "atoi": "stdlib.h", "atof": "stdlib.h",
+        "exit": "stdlib.h", "abort": "stdlib.h", "qsort": "stdlib.h",
+        "printf": "stdio.h", "fprintf": "stdio.h", "sprintf": "stdio.h",
+        "snprintf": "stdio.h", "fopen": "stdio.h", "fclose": "stdio.h",
+        "fread": "stdio.h", "fwrite": "stdio.h", "fgets": "stdio.h",
+        "strlen": "string.h", "strcpy": "string.h", "strncpy": "string.h",
+        "strcmp": "string.h", "strncmp": "string.h", "memcpy": "string.h",
+        "memset": "string.h", "memmove": "string.h", "strcat": "string.h",
+        "strtok": "string.h", "strstr": "string.h",
+        "sqrt": "math.h", "pow": "math.h", "fabs": "math.h",
+        "log": "math.h", "exp": "math.h", "sin": "math.h",
+        "cos": "math.h", "ceil": "math.h", "floor": "math.h",
+    }
+    src_dir = path / "src"
+    if src_dir.is_dir():
+        for cf in sorted(src_dir.glob("*.c")):
+            rel = str(cf.relative_to(path))
+            try:
+                c_text = cf.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            c_lines = c_text.splitlines()
+            # Collect included standard headers
+            included_headers = set()
+            for c_line in c_lines:
+                hm = re.match(r'\s*#\s*include\s*[<"]([^>"]+)[>"]', c_line)
+                if hm:
+                    included_headers.add(hm.group(1))
+            # Check for function usage without header
+            missing_headers: dict[str, set[str]] = {}  # header -> {functions}
+            for func_name, header in _stdlib_header_map.items():
+                if header in included_headers:
+                    continue
+                # Check if the function is actually used (as a call)
+                func_pat = r'\b' + re.escape(func_name) + r'\s*\('
+                if re.search(func_pat, c_text):
+                    missing_headers.setdefault(header, set()).add(func_name)
+            for header, funcs in sorted(missing_headers.items()):
+                func_list = ", ".join(sorted(funcs)[:5])
+                findings.append(Finding(
+                    rule_id="COMP-04", severity="note",
+                    title=f"Possibly missing #include <{header}>",
+                    message=f"File uses {func_list} but does not include <{header}>. This may cause implicit function declaration warnings.",
+                    file=rel,
+                    cran_says="Function declaration isn't a prototype."
+                ))
+
+    # LIC-03: No Dual Licensing Within Package (heuristic)
+    license_field = desc.get("License", "").upper()
+    _license_patterns = [
+        (r'\bMIT\b', "MIT"),
+        (r'\bGPL[- ]?2\b', "GPL-2"),
+        (r'\bGPL[- ]?3\b', "GPL-3"),
+        (r'\bAPACHE\b', "Apache"),
+        (r'\bBSD\b', "BSD"),
+        (r'\bLGPL\b', "LGPL"),
+    ]
+    if license_field:
+        files_to_check_lic: list[tuple[Path, str]] = []
+        for rf in r_files:
+            files_to_check_lic.append((rf, str(rf.relative_to(path))))
+        if src_dir.is_dir():
+            for ext in ("*.c", "*.cpp", "*.cc", "*.h", "*.hpp"):
+                for sf in src_dir.glob(ext):
+                    files_to_check_lic.append((sf, str(sf.relative_to(path))))
+        for fpath, rel in files_to_check_lic:
+            try:
+                header_lines = fpath.read_text(encoding="utf-8", errors="replace").splitlines()[:20]
+            except Exception:
+                continue
+            header_text = " ".join(header_lines).upper()
+            for pat, lic_name in _license_patterns:
+                if re.search(pat, header_text):
+                    # Check if this license contradicts DESCRIPTION
+                    if lic_name.upper() not in license_field:
+                        findings.append(Finding(
+                            rule_id="LIC-03", severity="note",
+                            title=f"Possible license mismatch in {fpath.name}",
+                            message=f"File header mentions '{lic_name}' but DESCRIPTION License is '{desc.get('License', '')}'. Ensure consistency.",
+                            file=rel,
+                            cran_says="License components which are templates need a '+ file LICENSE' component."
+                        ))
+                        break  # One finding per file
+
+    # PLAT-01: Must Work on Multiple Platforms (heuristic)
+    for rf in r_files:
+        rel = str(rf.relative_to(path))
+        try:
+            plat_text = rf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        plat_lines = plat_text.splitlines()
+        # Check for platform-specific patterns without cross-platform handling
+        has_platform_guard = bool(
+            re.search(r'\.Platform\$OS\.type', plat_text)
+            or re.search(r'Sys\.info\s*\(\s*\)', plat_text)
+        )
+        # Flag shell() calls — Windows-only
+        for i, pline in enumerate(plat_lines, 1):
+            stripped = pline.strip()
+            if stripped.startswith("#"):
+                continue
+            if re.search(r'\bshell\s*\(', stripped):
+                findings.append(Finding(
+                    rule_id="PLAT-01", severity="note",
+                    title="Windows-only shell() call",
+                    message=f"shell() is Windows-only. Use system2() for cross-platform compatibility: `{stripped[:80]}`",
+                    file=rel, line=i,
+                    cran_says="Package must work on all major platforms."
+                ))
+            if re.search(r'system\s*\(\s*["\']cmd\s+/c', stripped):
+                findings.append(Finding(
+                    rule_id="PLAT-01", severity="note",
+                    title="Windows cmd.exe call in system()",
+                    message=f"system('cmd /c ...') is Windows-only: `{stripped[:80]}`",
+                    file=rel, line=i,
+                    cran_says="Package must work on all major platforms."
+                ))
+
+    # NET-03: Rate Limit Policy (heuristic reminder)
+    has_network_code = False
+    for rf in r_files:
+        try:
+            net_text = rf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        if (re.search(r'\bhttr::', net_text) or re.search(r'\bcurl::', net_text)
+                or re.search(r'\bdownload\.file\s*\(', net_text)
+                or re.search(r'\bhttr2::', net_text)):
+            has_network_code = True
+            break
+    if has_network_code:
+        findings.append(Finding(
+            rule_id="NET-03", severity="note",
+            title="Package makes network requests",
+            message="Ensure API/URL calls implement rate limiting and respect server policies. CRAN checks may fail if external services are rate-limited.",
+            cran_says="Packages should gracefully handle HTTP errors and rate limits."
+        ))
 
     return findings
 
@@ -2057,6 +2228,121 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
                     cran_says="Duplicated vignette titles/index entries."
                 ))
 
+    # DOC-03: Examples Must Be Fast (heuristic)
+    _slow_example_patterns = [
+        (r'\bSys\.sleep\s*\(', "Sys.sleep()"),
+        (r'\bdownload\.file\s*\(', "download.file()"),
+        (r'\bhttr::', "httr:: network call"),
+        (r'\bcurl::', "curl:: network call"),
+        (r'\bsystem\s*\(', "system() call"),
+        (r'\bsystem2\s*\(', "system2() call"),
+    ]
+    for rd in rd_files:
+        rel = str(rd.relative_to(path))
+        try:
+            rd_text = rd.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        # Extract examples block
+        examples_match = re.search(r'\\examples\s*\{', rd_text)
+        if not examples_match:
+            continue
+        # Find the matching closing brace
+        start = examples_match.end()
+        brace_depth = 1
+        end = start
+        for ci in range(start, len(rd_text)):
+            if rd_text[ci] == '{':
+                brace_depth += 1
+            elif rd_text[ci] == '}':
+                brace_depth -= 1
+                if brace_depth == 0:
+                    end = ci
+                    break
+        examples_text = rd_text[start:end]
+        for slow_pat, slow_desc in _slow_example_patterns:
+            if re.search(slow_pat, examples_text):
+                findings.append(Finding(
+                    rule_id="DOC-03", severity="note",
+                    title=f"Potentially slow example in {rd.name}",
+                    message=f"Examples contain {slow_desc}. Ensure examples complete within 5 seconds or wrap in \\donttest{{}}.",
+                    file=rel,
+                    cran_says="Examples with CPU (user + system) or elapsed time > 5s"
+                ))
+                break  # One finding per file
+
+    # DOC-04: Changes Go in .R Files, Not .Rd (heuristic)
+    # Only flag if the project actually uses roxygen (at least one Rd file has the marker)
+    if uses_roxygen and rd_files:
+        has_any_roxygen_rd = False
+        for rd in rd_files:
+            try:
+                rd_text_check = rd.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            if "% Generated by roxygen2" in rd_text_check:
+                has_any_roxygen_rd = True
+                break
+        if has_any_roxygen_rd:
+            for rd in rd_files:
+                rel = str(rd.relative_to(path))
+                try:
+                    rd_text = rd.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+                if "% Generated by roxygen2" not in rd_text:
+                    findings.append(Finding(
+                        rule_id="DOC-04", severity="note",
+                        title=f"Hand-edited Rd file in roxygen project: {rd.name}",
+                        message="DESCRIPTION has RoxygenNote but this Rd file lacks '% Generated by roxygen2'. Hand-edits will be overwritten by roxygen2.",
+                        file=rel,
+                        cran_says="Documentation changes should be made in .R files, not .Rd files."
+                    ))
+
+    # DOC-06: Function References Should Include Parentheses (conservative)
+    ns = parse_namespace(path)
+    exported_funcs_doc06 = set()
+    for fun, _ in ns.get("exports", []):
+        exported_funcs_doc06.add(fun)
+    if exported_funcs_doc06 and rd_files:
+        for rd in rd_files:
+            rel = str(rd.relative_to(path))
+            try:
+                rd_text = rd.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            # Find \description{} section
+            desc_match = re.search(r'\\description\s*\{', rd_text)
+            if not desc_match:
+                continue
+            d_start = desc_match.end()
+            d_depth = 1
+            d_end = d_start
+            for ci in range(d_start, len(rd_text)):
+                if rd_text[ci] == '{':
+                    d_depth += 1
+                elif rd_text[ci] == '}':
+                    d_depth -= 1
+                    if d_depth == 0:
+                        d_end = ci
+                        break
+            desc_text = rd_text[d_start:d_end]
+            # Look for \code{funcname} where funcname is an export without ()
+            for m in re.finditer(r'\\code\{(\w+)\}', desc_text):
+                fname = m.group(1)
+                if fname in exported_funcs_doc06:
+                    # Check it's not followed by () inside the \code{}
+                    full_match = m.group(0)
+                    if "()" not in full_match:
+                        findings.append(Finding(
+                            rule_id="DOC-06", severity="note",
+                            title=f"Function reference without parentheses in {rd.name}",
+                            message=f"\\code{{{fname}}} refers to an exported function. Consider \\code{{{fname}()}} for clarity.",
+                            file=rel,
+                            cran_says="Function references should include parentheses."
+                        ))
+                        break  # One finding per file
+
     return findings
 
 
@@ -2156,6 +2442,179 @@ def check_structure(path: Path, desc: dict) -> list[Finding]:
                     message=f"Heading '{heading[:60]}' may not be recognized as a version heading.",
                     file="NEWS.md",
                 ))
+
+    # Wire in submission readiness checks
+    findings.extend(check_submission_readiness(path, desc))
+
+    return findings
+
+
+# --- Submission readiness checks ---
+
+def check_submission_readiness(path: Path, desc: dict) -> list[Finding]:
+    """Emit informational reminders about CRAN submission readiness."""
+    findings = []
+    version = desc.get("Version", "")
+    desc_file = str(path / "DESCRIPTION")
+
+    # COMP-11: Memory Sanitizer Compliance
+    src_dir = path / "src"
+    if src_dir.is_dir():
+        has_compiled = bool(
+            list(src_dir.glob("*.c")) or list(src_dir.glob("*.cpp"))
+            or list(src_dir.glob("*.cc")) or list(src_dir.glob("*.f"))
+            or list(src_dir.glob("*.f90")) or list(src_dir.glob("*.f95"))
+        )
+        if has_compiled:
+            findings.append(Finding(
+                rule_id="COMP-11", severity="note",
+                title="Compiled code requires sanitizer testing",
+                message="Package has compiled code. Run under ASAN/UBSAN/valgrind before CRAN submission: R CMD check --use-valgrind",
+                file="src/",
+                cran_says="Package has issues with memory access or undefined behavior."
+            ))
+
+    # CODE-18: Do Not Remove Failing Tests (heuristic)
+    tests_dir = path / "tests"
+    r_dir = path / "R"
+    if tests_dir.is_dir():
+        test_files = list(tests_dir.glob("*.R")) + list(tests_dir.rglob("test*.R"))
+        # Deduplicate
+        test_files = list(set(test_files))
+        r_files = list(r_dir.glob("*.R")) if r_dir.is_dir() else []
+        if len(test_files) == 0 and len(r_files) >= 5:
+            findings.append(Finding(
+                rule_id="CODE-18", severity="note",
+                title="tests/ directory exists but has no test files",
+                message=f"Package has {len(r_files)} R source files but tests/ contains no .R test files. Ensure tests were not removed.",
+                file="tests/",
+                cran_says="Tests should not be removed to avoid check failures."
+            ))
+
+    # SIZE-02: Check Time Must Be Under 10 Minutes
+    has_tests = tests_dir.is_dir() and any(tests_dir.rglob("*.R"))
+    has_vignettes = (path / "vignettes").is_dir() and any(_find_vignette_files(path))
+    has_compiled = src_dir.is_dir() and bool(
+        list(src_dir.glob("*.c")) or list(src_dir.glob("*.cpp"))
+        or list(src_dir.glob("*.cc")) or list(src_dir.glob("*.f"))
+        or list(src_dir.glob("*.f90"))
+    )
+    if has_tests and has_vignettes and has_compiled:
+        findings.append(Finding(
+            rule_id="SIZE-02", severity="note",
+            title="Package has tests, vignettes, and compiled code",
+            message="Packages with all three may approach the 10-minute check time limit. Profile with R CMD check --timings.",
+            cran_says="Total check time must not exceed 10 minutes."
+        ))
+
+    # NS-06: No Visible Binding / Missing Imports (reminder)
+    r_dir_sub = path / "R"
+    if r_dir_sub.is_dir() and any(r_dir_sub.glob("*.R")):
+        findings.append(Finding(
+            rule_id="NS-06", severity="note",
+            title="Run R CMD check for binding analysis",
+            message="Static analysis cannot fully detect missing imports or 'no visible binding' issues. Run 'R CMD check' for complete binding analysis.",
+            cran_says="no visible binding for global variable"
+        ))
+
+    # SUB-01: Run R CMD check --as-cran
+    findings.append(Finding(
+        rule_id="SUB-01", severity="note",
+        title="Pre-submission checklist: R CMD check --as-cran",
+        message="Run 'R CMD check --as-cran' on the built tarball and fix all ERRORs and WARNINGs before submission.",
+        cran_says="Please fix and resubmit."
+    ))
+
+    # SUB-02: Test on Multiple Platforms
+    findings.append(Finding(
+        rule_id="SUB-02", severity="note",
+        title="Pre-submission checklist: multi-platform testing",
+        message="Test on at least 2 platforms (e.g., via R-hub or win-builder) before CRAN submission.",
+        cran_says="Package check results depend on the platform."
+    ))
+
+    # SUB-03: Check Reverse Dependencies
+    if version and ".9000" not in version and ".9999" not in version:
+        # Looks like a release version; may be an update with reverse deps
+        if not version.startswith("0.") and version != "1.0.0":
+            findings.append(Finding(
+                rule_id="SUB-03", severity="note",
+                title="Pre-submission checklist: reverse dependency check",
+                message="If this package is already on CRAN, run revdepcheck::revdep_check() before updating.",
+                file=desc_file,
+                cran_says="Did you check reverse dependencies?"
+            ))
+
+    # SUB-05: First Submission Gets "New submission" NOTE
+    if version.startswith("0.") or version == "1.0.0":
+        findings.append(Finding(
+            rule_id="SUB-05", severity="note",
+            title="First CRAN submission expected NOTE",
+            message=f"Version '{version}' looks like a first release. A 'New submission' NOTE from CRAN is expected and harmless.",
+            file=desc_file,
+            cran_says="New submission"
+        ))
+
+    # SUB-06: Submission Frequency Limit
+    findings.append(Finding(
+        rule_id="SUB-06", severity="note",
+        title="CRAN submission frequency limit",
+        message="CRAN limits resubmissions to once every 1-2 months for the same package. Plan accordingly.",
+        cran_says="Packages should not be resubmitted more than once every 1-2 months."
+    ))
+
+    # SUB-07: CRAN Vacation Periods
+    current_month = datetime.date.today().month
+    if current_month == 12 or current_month in (7, 8):
+        month_name = datetime.date.today().strftime("%B")
+        findings.append(Finding(
+            rule_id="SUB-07", severity="note",
+            title="CRAN vacation period",
+            message=f"Current month is {month_name}. CRAN volunteers may be on vacation, causing longer review times.",
+            cran_says="CRAN maintainers take vacations."
+        ))
+
+    # NAME-02: Package Names Are Permanent
+    if version.startswith("0.") or version == "1.0.0":
+        pkg_name = desc.get("Package", "")
+        findings.append(Finding(
+            rule_id="NAME-02", severity="note",
+            title="Package names are permanent",
+            message=f"Package name '{pkg_name}' cannot be changed after CRAN acceptance. Choose carefully.",
+            file=desc_file,
+            cran_says="Package names cannot be changed after acceptance."
+        ))
+
+    # LIC-02: License Changes Must Be Highlighted
+    license_field = desc.get("License", "")
+    if "file license" in license_field.lower() or "file licence" in license_field.lower():
+        findings.append(Finding(
+            rule_id="LIC-02", severity="note",
+            title="License changes must be highlighted",
+            message="Package uses a custom license file. If updating, highlight license changes in cran-comments.md.",
+            file=desc_file,
+            cran_says="License changes should be noted in the cran-comments."
+        ))
+
+    # ENC-06 + DATA-06: Unmarked UTF-8 Strings in Data / Non-ASCII Characters in Data
+    data_dir = path / "data"
+    if data_dir.is_dir():
+        data_files = list(data_dir.glob("*.rda")) + list(data_dir.glob("*.RData"))
+        if data_files:
+            findings.append(Finding(
+                rule_id="ENC-06", severity="note",
+                title="Check data files for encoding issues",
+                message="Package has .rda/.RData files. Verify no unmarked UTF-8 strings or non-ASCII characters in data (requires R: tools::checkRdaFiles()).",
+                file="data/",
+                cran_says="Found non-ASCII strings which cannot be translated."
+            ))
+            findings.append(Finding(
+                rule_id="DATA-06", severity="note",
+                title="Check data files for non-ASCII characters",
+                message="Package has .rda/.RData files. Verify data does not contain non-ASCII characters without proper encoding declaration (requires R: tools::checkRdaFiles()).",
+                file="data/",
+                cran_says="Found non-ASCII strings which cannot be translated."
+            ))
 
     return findings
 
@@ -2511,6 +2970,69 @@ def check_vignettes(path: Path, desc: dict) -> list[Finding]:
                     file=str(path / "DESCRIPTION"),
                     cran_says="Package has 'vignettes' subdirectory but apparently no vignettes."
                 ))
+
+    # VIG-06: Vignette Data Files in Wrong Location (heuristic)
+    _data_read_patterns = [
+        r'\bread\.csv\s*\(', r'\breadRDS\s*\(', r'\bload\s*\(',
+        r'\bread\.table\s*\(', r'\bread\.delim\s*\(',
+        r'\bread_csv\s*\(', r'\bfread\s*\(',
+    ]
+    data_read_combined = '|'.join(_data_read_patterns)
+    for vf in vig_files:
+        rel = str(vf.relative_to(path))
+        try:
+            vig_text = vf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        in_chunk = False
+        for i, vline in enumerate(vig_text.splitlines(), 1):
+            if re.match(r'^```\{r', vline):
+                in_chunk = True
+                continue
+            if in_chunk and vline.strip().startswith('```'):
+                in_chunk = False
+                continue
+            if not in_chunk:
+                continue
+            if re.search(data_read_combined, vline):
+                # Check for suspicious relative paths
+                path_match = re.search(r'["\'](\.\./[^"\']+|data/[^"\']+)["\']', vline)
+                if path_match:
+                    ref_path = path_match.group(1)
+                    findings.append(Finding(
+                        rule_id="VIG-06", severity="note",
+                        title=f"Possibly incorrect data file path in {vf.name}",
+                        message=f"Vignette references '{ref_path}'. Data files for vignettes should be in inst/extdata/ or vignettes/.",
+                        file=rel, line=i,
+                        cran_says="Vignette data files should be accessible at vignette build time."
+                    ))
+                    break  # One finding per file
+
+    # VIG-07: Vignette CPU Time (heuristic)
+    _heavy_vignette_patterns = [
+        (r'\bparallel::', "parallel:: usage"),
+        (r'\bforeach\b', "foreach usage"),
+        (r'\bfuture::', "future:: usage"),
+        (r'\bfurrr::', "furrr:: usage"),
+        (r'\bmicrobenchmark\b', "microbenchmark usage"),
+        (r'\bbench::mark\b', "bench::mark usage"),
+    ]
+    for vf in vig_files:
+        rel = str(vf.relative_to(path))
+        try:
+            vig_text = vf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        for heavy_pat, heavy_desc in _heavy_vignette_patterns:
+            if re.search(heavy_pat, vig_text):
+                findings.append(Finding(
+                    rule_id="VIG-07", severity="note",
+                    title=f"Potentially heavy computation in {vf.name}",
+                    message=f"Vignette contains {heavy_desc}. Consider pre-computing results or using eval=FALSE for heavy chunks. CRAN limits vignette build time.",
+                    file=rel,
+                    cran_says="Vignette build time exceeded limit."
+                ))
+                break  # One finding per vignette
 
     return findings
 
@@ -3373,6 +3895,326 @@ def check_inst_directory(path: Path, desc: dict) -> list[Finding]:
     return findings
 
 
+# --- Online check helpers ---
+
+# Base R packages that don't need CRAN/Bioconductor validation
+BASE_R_PACKAGES = {
+    "R", "base", "compiler", "datasets", "grDevices", "graphics", "grid",
+    "methods", "parallel", "splines", "stats", "stats4", "tcltk", "tools",
+    "utils",
+}
+
+# Known valid R-ecosystem words that aspell would flag
+R_ECOSYSTEM_WORDS = {
+    "anova", "bioconductor", "CMD", "cph", "CRAN", "cre", "DataFrame",
+    "dplyr", "ggplot", "ggplot2", "knitr", "LazyData", "Makevars",
+    "NAMESPACE", "Rcpp", "Rd", "Rmd", "roxygen", "roxygen2",
+    "RoxygenNote", "rmarkdown", "Rnw", "RSQLite", "Shiny", "tibble",
+    "tidyr", "tidyverse", "vignette", "vignettes", "useDynLib",
+    "VignetteBuilder", "VignetteEncoding", "VignetteEngine",
+    "VignetteIndexEntry", "testthat",
+}
+
+
+def _collect_urls_from_files(path, desc):
+    """Collect all URLs from DESCRIPTION, man/*.Rd, vignettes/, README.md.
+
+    Returns [(url, relative_file, line_number), ...] with duplicates removed.
+    """
+    url_pattern = re.compile(r'https?://[^\s<>")\]},\']+')
+    results = []
+    seen_urls = set()
+
+    def _add_urls_from_file(filepath, rel_path):
+        try:
+            text = filepath.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return
+        for i, line in enumerate(text.splitlines(), 1):
+            for m in url_pattern.finditer(line):
+                url = m.group(0).rstrip(".,;:!?)")
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    results.append((url, rel_path, i))
+
+    desc_file = path / "DESCRIPTION"
+    if desc_file.exists():
+        _add_urls_from_file(desc_file, "DESCRIPTION")
+
+    man_dir = path / "man"
+    if man_dir.is_dir():
+        for rd in sorted(man_dir.glob("*.Rd")):
+            _add_urls_from_file(rd, str(rd.relative_to(path)))
+
+    vig_dir = path / "vignettes"
+    if vig_dir.is_dir():
+        for ext in ("*.Rmd", "*.Rnw", "*.Rtex", "*.rmd", "*.rnw", "*.qmd"):
+            for vf in sorted(vig_dir.glob(ext)):
+                _add_urls_from_file(vf, str(vf.relative_to(path)))
+
+    readme = path / "README.md"
+    if readme.exists():
+        _add_urls_from_file(readme, "README.md")
+
+    return results
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """HTTP handler that does not follow redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _http_head_no_redirect(url, timeout=10):
+    """Make an HTTP HEAD request without following redirects.
+
+    Returns (status_code, redirect_location).
+    Returns (-1, error_msg) on connection failure.
+    """
+    try:
+        opener = urllib.request.build_opener(_NoRedirectHandler)
+        req = urllib.request.Request(url, method="HEAD")
+        req.add_header("User-Agent", "pedanticran-checker/1.0")
+        response = opener.open(req, timeout=timeout)
+        return (response.status, response.headers.get("Location", ""))
+    except urllib.error.HTTPError as e:
+        location = ""
+        if hasattr(e, "headers"):
+            location = e.headers.get("Location", "")
+        return (e.code, location)
+    except Exception as e:
+        return (-1, str(e))
+
+
+def check_urls_online(path, desc):
+    """MISC-02 and MISC-07: Check URLs for validity and permanent redirects."""
+    findings = []
+    urls = _collect_urls_from_files(path, desc)
+
+    for url, rel_file, line_num in urls:
+        if "doi.org/" in url:
+            continue
+
+        time.sleep(0.1)
+
+        try:
+            status, location = _http_head_no_redirect(url, timeout=10)
+        except Exception:
+            continue
+
+        if status == -1:
+            continue
+
+        if 400 <= status < 600:
+            findings.append(Finding(
+                rule_id="MISC-02", severity="warning",
+                title=f"Broken URL (HTTP {status})",
+                message=f"URL returned HTTP {status}: {url}",
+                file=rel_file, line=line_num,
+                cran_says="Found the following (possibly) invalid URLs."
+            ))
+        elif status == 301:
+            redirect_target = location or "(unknown)"
+            findings.append(Finding(
+                rule_id="MISC-07", severity="note",
+                title="URL has permanent redirect (301)",
+                message=f"URL permanently redirects: {url} -> {redirect_target}",
+                file=rel_file, line=line_num,
+                cran_says="Found the following (possibly) invalid URLs: Status: 301 Moved Permanently"
+            ))
+
+    return findings
+
+
+def check_spelling_online(desc):
+    """MISC-03: Check spelling in Title and Description fields using aspell."""
+    findings = []
+    desc_file = "DESCRIPTION"
+
+    aspell_path = shutil.which("aspell")
+    if not aspell_path:
+        findings.append(Finding(
+            rule_id="MISC-03", severity="note",
+            title="Spell check skipped (aspell not found)",
+            message="Install aspell for spell checking: apt-get install aspell / brew install aspell",
+            file=desc_file,
+        ))
+        return findings
+
+    for field_name in ("Title", "Description"):
+        text = desc.get(field_name, "")
+        if not text:
+            continue
+
+        try:
+            result = subprocess.run(
+                [aspell_path, "list", "--lang=en"],
+                input=text, capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                continue
+
+            misspelled = set(result.stdout.strip().split("\n")) if result.stdout.strip() else set()
+            r_words_lower = {w.lower() for w in R_ECOSYSTEM_WORDS}
+            misspelled = {w for w in misspelled if w.lower() not in r_words_lower}
+            misspelled = {w for w in misspelled if w and len(w) > 1}
+
+            if misspelled:
+                words_str = ", ".join(sorted(misspelled)[:10])
+                suffix = f" (and {len(misspelled) - 10} more)" if len(misspelled) > 10 else ""
+                findings.append(Finding(
+                    rule_id="MISC-03", severity="note",
+                    title=f"Possible misspellings in {field_name}",
+                    message=f"Potentially misspelled words: {words_str}{suffix}. Add valid terms to inst/WORDLIST.",
+                    file=desc_file,
+                    cran_says="Possibly misspelled words in DESCRIPTION."
+                ))
+
+        except (subprocess.TimeoutExpired, Exception):
+            continue
+
+    return findings
+
+
+def _parse_dependency_packages(desc):
+    """Extract package names from Depends, Imports, and LinkingTo fields."""
+    packages = []
+    for field_name in ("Depends", "Imports", "LinkingTo"):
+        raw = desc.get(field_name, "")
+        if raw:
+            for entry in raw.split(","):
+                pkg = entry.strip().split("(")[0].strip()
+                if pkg and pkg not in BASE_R_PACKAGES:
+                    packages.append(pkg)
+    return packages
+
+
+def _check_cran_package_exists(pkg, timeout=10):
+    """Check if a package exists on CRAN. Returns True if found."""
+    url = f"https://cran.r-project.org/web/packages/{pkg}/index.html"
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        req.add_header("User-Agent", "pedanticran-checker/1.0")
+        response = urllib.request.urlopen(req, timeout=timeout)
+        return response.status == 200
+    except urllib.error.HTTPError:
+        return False
+    except Exception:
+        return False
+
+
+def _check_bioconductor_package_exists(pkg, timeout=10):
+    """Check if a package exists on Bioconductor. Returns True if found."""
+    url = f"https://bioconductor.org/packages/{pkg}/"
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        req.add_header("User-Agent", "pedanticran-checker/1.0")
+        response = urllib.request.urlopen(req, timeout=timeout)
+        return response.status == 200
+    except urllib.error.HTTPError:
+        return False
+    except Exception:
+        return False
+
+
+def check_dependencies_online(desc):
+    """DEP-01 and DEP-03: Check dependencies on CRAN/Bioconductor and health."""
+    findings = []
+    desc_file = "DESCRIPTION"
+    packages = _parse_dependency_packages(desc)
+    additional_repos = desc.get("Additional_repositories", "")
+
+    for pkg in packages:
+        time.sleep(0.1)
+
+        try:
+            on_cran = _check_cran_package_exists(pkg)
+        except Exception:
+            continue
+
+        if on_cran:
+            time.sleep(0.1)
+            try:
+                check_url = f"https://cran.r-project.org/web/checks/check_results_{pkg}.html"
+                req = urllib.request.Request(check_url)
+                req.add_header("User-Agent", "pedanticran-checker/1.0")
+                response = urllib.request.urlopen(req, timeout=10)
+                check_page = response.read().decode("utf-8", errors="replace")
+                error_count = check_page.count(">ERROR<")
+                if error_count >= 2:
+                    findings.append(Finding(
+                        rule_id="DEP-03", severity="note",
+                        title=f"Dependency '{pkg}' has CRAN check errors",
+                        message=f"Package '{pkg}' has ERROR results on {error_count} platforms. Monitor at https://cran.r-project.org/web/checks/check_results_{pkg}.html",
+                        file=desc_file,
+                        cran_says="Archived on [date] as requires archived package."
+                    ))
+            except Exception:
+                pass
+            continue
+
+        try:
+            on_bioc = _check_bioconductor_package_exists(pkg)
+        except Exception:
+            continue
+
+        if on_bioc:
+            continue
+
+        if additional_repos:
+            findings.append(Finding(
+                rule_id="DEP-01", severity="note",
+                title=f"Dependency '{pkg}' not on CRAN/Bioconductor",
+                message=f"Package '{pkg}' not found on CRAN or Bioconductor. It may be from Additional_repositories: {additional_repos}",
+                file=desc_file,
+            ))
+        else:
+            findings.append(Finding(
+                rule_id="DEP-01", severity="error",
+                title=f"Dependency '{pkg}' not on CRAN or Bioconductor",
+                message=f"Package '{pkg}' in Depends/Imports/LinkingTo is not available on CRAN or Bioconductor. CRAN requires all strong dependencies to be on CRAN or Bioconductor.",
+                file=desc_file,
+                cran_says="Package required but not available."
+            ))
+
+    return findings
+
+
+def check_package_name_online(desc):
+    """NAME-01: Check if the package name already exists on CRAN."""
+    findings = []
+    desc_file = "DESCRIPTION"
+    pkg_name = desc.get("Package", "")
+    if not pkg_name:
+        return findings
+
+    try:
+        exists_on_cran = _check_cran_package_exists(pkg_name)
+    except Exception:
+        return findings
+
+    if exists_on_cran:
+        version = desc.get("Version", "")
+        if ".9000" in version or ".9999" in version:
+            findings.append(Finding(
+                rule_id="NAME-01", severity="note",
+                title=f"Package name '{pkg_name}' exists on CRAN (development version detected)",
+                message=f"Package '{pkg_name}' already exists on CRAN. Your version '{version}' is a development version, so this is likely an update.",
+                file=desc_file,
+            ))
+        else:
+            findings.append(Finding(
+                rule_id="NAME-01", severity="note",
+                title=f"Package name '{pkg_name}' exists on CRAN",
+                message=f"Package '{pkg_name}' already exists on CRAN. If this is a new submission, you'll need to choose a different name.",
+                file=desc_file,
+                cran_says="Package name must be case-insensitively unique across CRAN."
+            ))
+
+    return findings
+
+
 # --- Output formatting ---
 
 SEVERITY_ORDER = {"error": 0, "warning": 1, "note": 2}
@@ -3418,6 +4260,8 @@ def main():
                         help="Minimum severity to report")
     parser.add_argument("--fail-on", default="error", choices=["error", "warning", "note"],
                         help="Fail the check at this severity level")
+    parser.add_argument("--online", action="store_true",
+                        help="Enable checks requiring network access (URL validation, CRAN lookups, spell check)")
     args = parser.parse_args()
 
     pkg_path = Path(args.path).resolve()
@@ -3450,6 +4294,13 @@ def main():
     all_findings.extend(check_system_requirements(pkg_path, desc))
     all_findings.extend(check_maintainer_email(pkg_path, desc))
     all_findings.extend(check_inst_directory(pkg_path, desc))
+
+    # Online checks (require network access)
+    if args.online:
+        all_findings.extend(check_urls_online(pkg_path, desc))
+        all_findings.extend(check_spelling_online(desc))
+        all_findings.extend(check_dependencies_online(desc))
+        all_findings.extend(check_package_name_online(desc))
 
     # Filter by minimum severity
     findings = [f for f in all_findings if SEVERITY_ORDER[f.severity] <= min_sev]
