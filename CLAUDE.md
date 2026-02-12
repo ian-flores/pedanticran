@@ -4,22 +4,25 @@ A Claude Code plugin that helps R package developers survive CRAN submission.
 
 ## Project Structure
 
-- `knowledge/cran-rules.md` — 130 rules across 19 categories, with verbatim rejection text
+- `knowledge/cran-rules.md` — 141 rules across 19 categories, with verbatim rejection text
 - `skills/cran-audit.md` — The `/cran-audit` skill: reads an R package and produces a pre-submission report
 - `skills/cran-fix.md` — The `/cran-fix` skill: tiered auto-remediation (mechanical → reviewed → user input)
 - `skills/cran-respond.md` — The `/cran-respond` skill: parses CRAN rejection emails and drafts resubmission
 - `action/check.py` — Python static analyzer (65+ checks, no R dependency)
 - `action/action.yml` — GitHub Action definition
-- `research/` — Mailing list analysis reports (2023–2025) and checker validation
+- `tests/` — 120 pytest tests with 3 fixture R packages (clean, problematic, edge-cases)
+- `research/` — Mailing list analysis reports (2015–2025) and checker validation
 - `install.sh` — Installs skills into `~/.claude/skills/`
 
 ## Development
 
 When editing skills, test them by running the skill on a real R package directory.
 
+When editing `action/check.py`, run the test suite: `python3 -m pytest tests/ -v`
+
 The knowledge base (`knowledge/cran-rules.md`) is the core IP. Keep it:
 - Structured by category (DESCRIPTION, code, docs, etc.)
-- Each rule has: ID, severity, what CRAN says (verbatim), how to detect, how to fix
+- Each rule has: ID, severity, what CRAN says (verbatim), how to detect, how to fix, since when
 - Updated when CRAN policies change
 
 ## GitHub Action
@@ -46,5 +49,6 @@ All four phases are implemented:
 3. `/cran-respond` (rejection email parser)
 4. GitHub Action (CI integration)
 
-Knowledge base sourced from 3 years of CRAN mailing list rejections (2023–2025).
+Knowledge base sourced from a decade of CRAN mailing list rejections (2015–2025).
 Validated against dplyr (large) and glosario (small) — see `research/checker-validation.md`.
+CI runs 120 pytest tests on Python 3.11/3.12 via `.github/workflows/test.yml`.
