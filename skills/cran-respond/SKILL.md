@@ -59,7 +59,12 @@ Thanks, we see [issue]. Please fix before we can proceed.
 
 ### Step 3: Map to Knowledge Base
 
-Read `~/.claude/knowledge/cran-rules.md` and map each parsed issue to its rule ID. This provides:
+Read the knowledge base and map each parsed issue to its rule ID. Locate `cran-rules.md` in this order and read the first one that exists:
+1. `${CLAUDE_PLUGIN_ROOT}/knowledge/cran-rules.md` (installed as a Claude Code plugin)
+2. `~/.claude/knowledge/cran-rules.md` or `.claude/knowledge/cran-rules.md` (installed with `install.sh`)
+3. Otherwise Glob for `**/pedanticran/knowledge/cran-rules.md`
+
+The knowledge base provides:
 - The exact policy being enforced
 - Detection strategy
 - Fix strategy

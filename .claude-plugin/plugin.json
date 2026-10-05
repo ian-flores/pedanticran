@@ -1,0 +1,12 @@
+{
+  "name": "pedanticran",
+  "version": "1.0.0",
+  "description": "Catch the CRAN policy violations that R CMD check misses. /pedanticran:cran-audit finds them, /pedanticran:cran-fix fixes what it safely can, /pedanticran:cran-respond turns a CRAN rejection email into a fix plan and resubmission comments.",
+  "author": {
+    "name": "ian-flores"
+  },
+  "homepage": "https://github.com/ian-flores/pedanticran",
+  "repository": "https://github.com/ian-flores/pedanticran",
+  "license": "MIT",
+  "keywords": ["r", "cran", "r-package", "lint", "policy"]
+}

@@ -28,9 +28,10 @@ If working directory is not an R package, ask the user for the path.
 
 ### Step 2: Read the Knowledge Base
 
-Read the full CRAN rules knowledge base for reference. Its location depends on where pedanticran is installed:
-- Check `~/.claude/knowledge/cran-rules.md`
-- Or check the pedanticran repo at the path the user has configured
+Read the full CRAN rules knowledge base for reference. Locate `cran-rules.md` in this order and read the first one that exists:
+1. `${CLAUDE_PLUGIN_ROOT}/knowledge/cran-rules.md` (installed as a Claude Code plugin)
+2. `~/.claude/knowledge/cran-rules.md` or `.claude/knowledge/cran-rules.md` (installed with `install.sh`)
+3. Otherwise Glob for `**/pedanticran/knowledge/cran-rules.md`
 
 ### Step 3: Run All Checks
 

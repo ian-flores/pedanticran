@@ -40,7 +40,7 @@ runs:
   using: 'composite'
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.11'
 
@@ -52,4 +52,4 @@ runs:
         if [ "${{ inputs.online }}" = "true" ]; then
           ONLINE_FLAG="--online"
         fi
-        python "${{ github.action_path }}/check.py" --path "${{ inputs.path }}" --severity "${{ inputs.severity }}" --fail-on "${{ inputs.fail-on }}" $ONLINE_FLAG
+        python "${{ github.action_path }}/action/check.py" --path "${{ inputs.path }}" --severity "${{ inputs.severity }}" --fail-on "${{ inputs.fail-on }}" $ONLINE_FLAG

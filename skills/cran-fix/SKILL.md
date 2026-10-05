@@ -19,7 +19,10 @@ Use this skill when a user says:
 
 ### Step 1: Run the Audit First
 
-Before fixing anything, run a quick internal audit to identify all issues. Read the knowledge base at `~/.claude/knowledge/cran-rules.md` (or the pedanticran repo) for rule details.
+Before fixing anything, run a quick internal audit to identify all issues. Read the knowledge base for rule details. Locate `cran-rules.md` in this order and read the first one that exists:
+1. `${CLAUDE_PLUGIN_ROOT}/knowledge/cran-rules.md` (installed as a Claude Code plugin)
+2. `~/.claude/knowledge/cran-rules.md` or `.claude/knowledge/cran-rules.md` (installed with `install.sh`)
+3. Otherwise Glob for `**/pedanticran/knowledge/cran-rules.md`
 
 Read these files:
 - `DESCRIPTION`

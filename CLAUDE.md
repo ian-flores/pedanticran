@@ -5,14 +5,15 @@ A Claude Code plugin that helps R package developers survive CRAN submission.
 ## Project Structure
 
 - `knowledge/cran-rules.md` — 141 rules across 19 categories, with verbatim rejection text
-- `skills/cran-audit.md` — The `/cran-audit` skill: reads an R package and produces a pre-submission report
-- `skills/cran-fix.md` — The `/cran-fix` skill: tiered auto-remediation (mechanical → reviewed → user input)
-- `skills/cran-respond.md` — The `/cran-respond` skill: parses CRAN rejection emails and drafts resubmission
+- `skills/cran-audit/SKILL.md` — The `/cran-audit` skill: reads an R package and produces a pre-submission report
+- `skills/cran-fix/SKILL.md` — The `/cran-fix` skill: tiered auto-remediation (mechanical → reviewed → user input)
+- `skills/cran-respond/SKILL.md` — The `/cran-respond` skill: parses CRAN rejection emails and drafts resubmission
 - `action/check.py` — Python static analyzer (65+ checks, no R dependency)
-- `action/action.yml` — GitHub Action definition
+- `action.yml` — GitHub Action definition (at the repo root so `uses: ian-flores/pedanticran@v1` resolves)
+- `.claude-plugin/` — plugin manifest and single-plugin marketplace; bump `version` in both on release
 - `tests/` — 120 pytest tests with 3 fixture R packages (clean, problematic, edge-cases)
 - `research/` — Mailing list analysis reports (2015–2025) and checker validation
-- `install.sh` — Installs skills into `~/.claude/skills/`
+- `install.sh` — Manual install (non-plugin) into `~/.claude/skills/<name>/SKILL.md`
 
 ## Development
 
@@ -27,10 +28,10 @@ The knowledge base (`knowledge/cran-rules.md`) is the core IP. Keep it:
 
 ## GitHub Action
 
-The `action/` directory contains a standalone GitHub Action. Users add it to their R package CI:
+The root `action.yml` runs `action/check.py` as a standalone GitHub Action. Users add it to their R package CI:
 
 ```yaml
-- uses: ian-flores/pedanticran@main
+- uses: ian-flores/pedanticran@v1
   with:
     path: '.'
     severity: 'warning'   # report warnings and errors

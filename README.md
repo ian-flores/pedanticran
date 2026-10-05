@@ -38,8 +38,8 @@ jobs:
   pedantic:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: ian-flores/pedanticran@main
+      - uses: actions/checkout@v7
+      - uses: ian-flores/pedanticran@v1
         with:
           severity: 'warning'
           fail-on: 'error'
@@ -49,15 +49,24 @@ No R installation required. Runs in seconds. Annotates the exact files and lines
 
 ### Claude Code plugin
 
-```bash
-# Install globally (available in all projects)
-curl -fsSL https://raw.githubusercontent.com/ian-flores/pedanticran/main/install.sh | bash -s -- --global
+In Claude Code:
 
-# Or install locally in your R package
-curl -fsSL https://raw.githubusercontent.com/ian-flores/pedanticran/main/install.sh | bash -s -- --local
+```
+/plugin marketplace add ian-flores/pedanticran
+/plugin install pedanticran@pedanticran
 ```
 
-Then in Claude Code, inside your R package directory:
+Without the plugin system, clone the repo and run the installer:
+
+```bash
+git clone https://github.com/ian-flores/pedanticran.git
+cd pedanticran
+./install.sh --global          # ~/.claude/, available in all projects
+# or, from inside your R package directory:
+/path/to/pedanticran/install.sh --local
+```
+
+Then in Claude Code, inside your R package directory (as a plugin the commands are namespaced, e.g. `/pedanticran:cran-audit`):
 
 | Command | What it does |
 |---------|-------------|
@@ -96,7 +105,7 @@ Every rule includes the verbatim CRAN rejection text, so you know exactly what r
 ## GitHub Action options
 
 ```yaml
-- uses: ian-flores/pedanticran@main
+- uses: ian-flores/pedanticran@v1
   with:
     path: '.'          # Path to R package (default: repo root)
     severity: 'warning' # Minimum severity to report: error, warning, note
