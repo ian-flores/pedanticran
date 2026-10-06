@@ -2,33 +2,66 @@
 
 [![Tests](https://github.com/ian-flores/pedanticran/actions/workflows/test.yml/badge.svg)](https://github.com/ian-flores/pedanticran/actions/workflows/test.yml)
 
-> **Beta**
-> This project is in beta. Checks may have false positives and the API may change. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
+> **Beta.** Some checks may flag things that are fine. Options may change between versions. Use pedanticran alongside the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html), not instead of it.
 
-**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 155 CRAN rules (compiled from over a decade of mailing list rejections, 2015 through September 2026) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
+pedanticran finds the problems that get R packages rejected by CRAN, before you submit.
 
-Works as a **Claude Code plugin** (interactive) or a **GitHub Action** (CI).
+`R CMD check` tells you if your package builds and runs. It does not tell you if a CRAN reviewer will accept it. Reviewers also check things like how you wrote your title, whether you used `print()` instead of `message()`, and whether every exported function documents what it returns. pedanticran checks those things too.
 
-## The problem
+It knows 155 rules. They come from CRAN's policy, R release notes, and CRAN rejection emails posted to the R mailing lists from 2015 to September 2026. Each rule includes the exact words CRAN reviewers use when they reject a package for it.
 
-[~35% of first-time CRAN submissions](https://llrs.dev/post/2024/01/10/submission-cran-first-try/) are rejected for policy issues, not code issues. Things like:
+You can use it in two ways:
 
-- `T` instead of `TRUE`
-- Title not in Title Case (but "a" should be lowercase, and don't capitalize after a colon if...)
-- `print()` where you should use `message()`
-- Missing `\value` tag on one exported function out of forty
-- `\dontrun{}` where CRAN wanted `\donttest{}`
-- `bool` redefined in C code (now a keyword in C23/R 4.5+)
-- Lost braces in Rd files (broke 3,000+ packages in R 4.4)
-- Date field that's a month old blocking your resubmission
+- **In Claude Code**, to audit your package, fix problems, or answer a rejection email.
+- **In GitHub Actions**, to check your package on every push.
 
-`R CMD check` doesn't catch these. pedanticran does.
+## Why you might need this
 
-## Quick start
+[About 35% of first-time CRAN submissions](https://llrs.dev/post/2024/01/10/submission-cran-first-try/) are rejected. Many are rejected for small policy problems, not broken code. For example:
 
-### GitHub Action
+- Writing `T` instead of `TRUE`
+- A title that is not in Title Case
+- Using `print()` where CRAN wants `message()`
+- One exported function out of forty with no `\value` section
+- Using `\dontrun{}` where CRAN wanted `\donttest{}`
+- A `Date` field more than a month old
+- C code that uses `bool` as a name (it is a keyword in the C23 standard, which R 4.5 uses by default)
 
-Add to `.github/workflows/cran-check.yml`:
+`R CMD check` does not catch these. pedanticran does.
+
+## Getting started
+
+### Use it in Claude Code
+
+Run these two commands in Claude Code:
+
+```
+/plugin marketplace add ian-flores/pedanticran
+/plugin install pedanticran@pedanticran
+```
+
+Then open Claude Code in your R package folder and use one of these commands:
+
+| Command | What it does |
+|---------|--------------|
+| `/pedanticran:cran-audit` | Looks for problems and lists them by how serious they are. Changes nothing. |
+| `/pedanticran:cran-fix` | Fixes the problems it safely can. Asks you before anything risky. |
+| `/pedanticran:cran-respond` | Paste in a CRAN rejection email. You get a fix for each point and a draft reply. |
+
+If you don't use the plugin system, you can install the commands by hand. They are then called `/cran-audit`, `/cran-fix` and `/cran-respond`.
+
+```bash
+git clone https://github.com/ian-flores/pedanticran.git
+cd pedanticran
+./install.sh --global    # for all your projects
+
+# or, for one package only, run this from inside the package folder:
+/path/to/pedanticran/install.sh --local
+```
+
+### Use it in GitHub Actions
+
+Create the file `.github/workflows/cran-check.yml` in your package:
 
 ```yaml
 name: CRAN Policy Check
@@ -45,114 +78,92 @@ jobs:
           fail-on: 'error'
 ```
 
-No R installation required. Runs in seconds. Annotates the exact files and lines.
-
-### Claude Code plugin
-
-In Claude Code:
-
-```
-/plugin marketplace add ian-flores/pedanticran
-/plugin install pedanticran@pedanticran
-```
-
-Without the plugin system, clone the repo and run the installer:
-
-```bash
-git clone https://github.com/ian-flores/pedanticran.git
-cd pedanticran
-./install.sh --global          # ~/.claude/, available in all projects
-# or, from inside your R package directory:
-/path/to/pedanticran/install.sh --local
-```
-
-Then in Claude Code, inside your R package directory (as a plugin the commands are namespaced, e.g. `/pedanticran:cran-audit`):
-
-| Command | What it does |
-|---------|-------------|
-| `/cran-audit` | Read-only audit. Finds issues, grouped by severity. |
-| `/cran-fix` | Fixes what it can. Asks before touching anything risky. |
-| `/cran-respond` | Paste a CRAN rejection email. Gets a fix plan + resubmission draft. |
+You don't need R installed. It runs in a few seconds and marks each problem on the exact file and line.
 
 ## What it checks
 
-155 rules across 19 categories, sourced from over a decade (2015 through September 2026) of CRAN mailing list rejections, policy revisions, and R release notes (through R 4.6.1):
+155 rules in 19 groups:
 
-| Category | Rules | Examples |
-|----------|------:|---------|
-| DESCRIPTION | 17 | Title case, quoting software names, valid Authors@R, license format, stale Date field, smart quotes |
-| Code Behavior | 24 | T/F literals, print→message, options/par without on.exit, staged install paths, stringsAsFactors, class(matrix()), if-condition length |
-| Compiled Code | 15 | C23 keywords, R_NO_REMAP, native routine registration, ASAN/UBSAN compliance, UCRT toolchain, Rust vendoring |
-| Documentation | 15 | Missing @return, \dontrun misuse, \donttest execution under --as-cran, lost braces (R 4.3+), HTML5 Rd validation |
-| Licensing | 3 | License validity, license changes, dual licensing prohibition |
-| Size & Performance | 2 | Tarball size (10MB), check time (10 min) |
-| Cross-Platform | 4 | Multi-platform support, no binary executables |
-| Dependencies | 3 | Strong deps on CRAN, conditional Suggests, dependency health monitoring |
-| Internet | 3 | Graceful failure, HTTPS, rate limit policy (rev6277) |
-| Submission | 7 | R CMD check, multi-platform testing, reverse deps, vacation periods |
-| Package Naming | 2 | Case-insensitive uniqueness, permanence |
-| Miscellaneous | 7 | NEWS format, URL validity, URL redirect intolerance, spelling, .Rbuildignore, Makefile portability |
-| Encoding | 8 | Missing Encoding field, non-ASCII in R source, BOM detection, \x escape sequences |
-| Vignettes | 8 | VignetteBuilder declaration, metadata, stale inst/doc, build dependencies, html_document size |
-| NAMESPACE | 9 | Import conflicts, importFrom preference, S3 method registration, broad exportPattern, Depends misuse, no library() in package code |
-| Data | 9 | Undocumented datasets, LazyData configuration, compression, size limits, invalid formats |
-| System Requirements | 7 | Undeclared system libraries, external programs, C++ standard consistency, Java source requirements |
-| Maintainer Email | 6 | Mailing list detection, disposable domains, placeholder addresses, noreply patterns |
-| inst/ Directory | 6 | Hidden files, deprecated CITATION format, reserved directories, third-party copyright |
+| Group | Rules | Examples |
+|-------|------:|----------|
+| DESCRIPTION file | 17 | Title Case, quoting software names, `Authors@R`, license format, old `Date` field |
+| R code | 24 | `T`/`F`, `print()` vs `message()`, restoring `options()` and `par()`, writing only to temp folders, user cache size |
+| Compiled code (C, C++, Fortran, Rust) | 15 | New C and C++ standards, R functions you are not allowed to call, missing C++ headers, Rcpp settings |
+| Documentation | 15 | Missing return values, `\dontrun` misuse, broken Rd braces, links that don't work |
+| Licensing | 3 | Valid licenses, one license for the whole package |
+| Size and speed | 2 | Package size (10 MB), check time (10 minutes) |
+| Platforms | 4 | Working on every platform, no binary files, macOS paths |
+| Dependencies | 3 | Required packages must be on CRAN or Bioconductor |
+| Internet | 3 | Failing politely when a website is down, HTTPS, rate limits |
+| Submission | 7 | Testing on several platforms, checking packages that depend on yours, CRAN holidays |
+| Package name | 2 | Names must be unique, ignoring case |
+| Other | 7 | NEWS file, URLs, spelling, `.Rbuildignore`, Makefiles |
+| Encoding | 8 | Non-ASCII characters, missing `Encoding` field |
+| Vignettes | 8 | Build setup, metadata, old built files |
+| NAMESPACE | 9 | Imports, S3 methods, no `library()` calls in package code |
+| Data | 9 | Documenting datasets, compression, size limits |
+| System requirements | 7 | Declaring outside libraries and programs, C++ standard |
+| Maintainer email | 6 | Mailing lists, throwaway addresses, no-reply addresses |
+| `inst/` folder | 6 | Hidden files, old `CITATION` format, other people's copyright |
 
-Every rule includes the verbatim CRAN rejection text, so you know exactly what reviewers will say.
+The full list is in [`knowledge/cran-rules.md`](knowledge/cran-rules.md).
 
-## GitHub Action options
+### The GitHub Action checks fewer rules
+
+The GitHub Action checks 141 of the 155 rules. The 14 rules added in the September 2026 update are only used by the Claude Code commands for now.
+
+## GitHub Action settings
 
 ```yaml
 - uses: ian-flores/pedanticran@v1
   with:
-    path: '.'          # Path to R package (default: repo root)
-    severity: 'warning' # Minimum severity to report: error, warning, note
-    fail-on: 'error'    # Fail the check at this severity
-    online: 'true'      # Enable URL validation, CRAN lookups, spell check
+    path: '.'            # where your package is (default: the top of the repo)
+    severity: 'warning'  # lowest level to show: error, warning or note
+    fail-on: 'error'     # fail the run at this level or above
+    online: 'true'       # also check URLs, spelling, and that dependencies exist on CRAN
 ```
 
-**Outputs:** `issues`, `errors`, `warnings`, `notes` — use in downstream steps.
+The action reports how many problems it found as `issues`, `errors`, `warnings` and `notes`. Later steps in your workflow can use these numbers.
 
-The checker is pure Python (stdlib only). No R, no compiled dependencies. Covers the original 141 rules across DESCRIPTION, R code, C/C++/Fortran, Makevars, configure scripts, documentation, encoding, vignettes, NAMESPACE, data, system requirements, maintainer email, and inst/ directory. Pass `--online` to also validate URLs, check spelling, and verify dependencies exist on CRAN. The 14 rules added in the 2026 update (R 4.6 changes, new policy text, 2026 rejection patterns) are in the knowledge base used by the Claude Code skills but are not yet implemented in the checker.
+It is written in plain Python with no extra packages, so it needs no setup.
 
 ## How `/cran-fix` works
 
-Fixes are applied in tiers:
+It sorts fixes into three groups:
 
-1. **Mechanical** (applied automatically): `T`→`TRUE`, `http`→`https`, `\dontrun`→`\donttest`, smart quotes, stale Date field, `sprintf`→`snprintf`, `#!/bin/bash`→`#!/bin/sh`
-2. **Safe with review** (shows diff first): Title case, quoting names, adding `@return` tags, `Rf_` prefix for C++ R API, lost braces in Rd, Fortran KIND portability
-3. **Needs input** (asks you): License choice, rewriting Description, C23 keyword conflicts, Rust crate vendoring, rate limiting strategy
+1. **Simple fixes it makes on its own**, such as `T` to `TRUE`, `http` to `https`, and removing an old `Date` field.
+2. **Fixes it makes and then shows you**, such as Title Case, adding `@return` tags, and fixing Rd braces.
+3. **Fixes it asks you about first**, such as choosing a license, rewriting your Description, or limiting how often your package calls a website.
 
-Nothing destructive happens without your approval.
+It never deletes or rewrites anything important without asking.
 
 ## How `/cran-respond` works
 
-Paste your rejection email. pedanticran:
+Paste in your rejection email. pedanticran will:
 
-1. Parses every distinct issue from the email
-2. Maps each to a specific policy rule
-3. Scans for related issues CRAN didn't mention yet (if they flagged one missing `@return`, it checks all your exports)
-4. Provides exact fixes with file paths
-5. Drafts your resubmission comment
+1. Split the email into separate problems.
+2. Match each problem to a rule.
+3. Look for related problems CRAN didn't mention yet. For example, if CRAN flagged one missing `@return`, it checks every exported function.
+4. Tell you exactly what to change, and in which file.
+5. Write a draft of your reply to CRAN.
 
-## How it complements R CMD check and devtools
+## How it fits with other tools
 
-pedanticran is not a replacement for `R CMD check` — it catches what `R CMD check` misses. Of 155 rules, many are unique to pedanticran and checked by no other automated tool in the R ecosystem.
+pedanticran does not replace `R CMD check`. Run both.
 
-`devtools::check()` is a convenience wrapper around `R CMD check` — it adds zero additional policy checks. `goodpractice` covers about 10–15% of pedanticran's unique rules. The full gap analysis is in [`research/devtools-comparison.md`](research/devtools-comparison.md).
+| Tool | The question it answers |
+|------|-------------------------|
+| `R CMD check` | Does the package build and pass R's own checks? |
+| `devtools::check()` | The same as `R CMD check`, with an easier way to run it. |
+| `devtools::release()` | Did you remember the steps on a release checklist? |
+| `goodpractice` | Are there common style problems? (It covers about 10–15% of pedanticran's extra rules.) |
+| **pedanticran** | **Will a CRAN reviewer accept this package?** |
 
-| Tool | Role |
-|------|------|
-| `R CMD check` | "Does it build and pass basic checks?" |
-| `devtools::release()` | "Did you remember to do these things?" (manual checklist) |
-| `goodpractice` | "Here are some style suggestions" (partial) |
-| **pedanticran** | **"Will a CRAN reviewer accept this?"** (the actual gate) |
+There is a detailed comparison in [`research/devtools-comparison.md`](research/devtools-comparison.md).
 
 ## Contributing
 
-The knowledge base (`knowledge/cran-rules.md`) is the heart of the project. If you've been rejected for a reason not covered, open an issue with the rejection text.
+The rules in [`knowledge/cran-rules.md`](knowledge/cran-rules.md) are the core of this project. If CRAN rejected your package for a reason pedanticran doesn't cover, please open an issue and paste the rejection text.
 
 ## License
 
