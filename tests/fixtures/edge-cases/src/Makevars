@@ -1,0 +1,5 @@
+# Rcpp:::LdFlags() is no longer needed; -Wno-unused is not used here either
+PKG_CXXFLAGS = -Wall -O2
+PKG_LIBS = $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
+# x86_64 builds may still target macOS 11
+PKG_CFLAGS = -mmacosx-version-min=11.0

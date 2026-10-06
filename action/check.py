@@ -171,6 +171,50 @@ def is_in_comment(line: str) -> bool:
     return stripped.startswith("#")
 
 
+def strip_r_strings_and_comment(line: str) -> str:
+    """Blank out string and backtick-name contents and drop a trailing # comment from one R line."""
+    out = []
+    quote = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == "\\":
+                out.append("  ")
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+                out.append(ch)
+            else:
+                out.append(" ")
+        elif ch in "\"'`":
+            quote = ch
+            out.append(ch)
+        elif ch == "#":
+            break
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def find_makevars_files(path: Path) -> list[Path]:
+    """Find src/Makevars* (Makevars, .win, .ucrt, .in, ...)."""
+    src_dir = path / "src"
+    if not src_dir.is_dir():
+        return []
+    return sorted(f for f in src_dir.glob("Makevars*") if f.is_file())
+
+
+def parse_depends_r_version(desc: dict) -> tuple[int, ...] | None:
+    """Return the R (>= x.y.z) version from Depends as a tuple, or None."""
+    m = re.search(r'\bR\s*\(\s*>=?\s*([0-9]+(?:[.-][0-9]+)*)\s*\)', desc.get("Depends", ""))
+    if not m:
+        return None
+    return tuple(int(p) for p in re.split(r'[.-]', m.group(1)))
+
+
 def _function_nesting_depth(filepath: Path, target_line: int) -> int:
     """Count how many function() scopes enclose a given line number (1-indexed).
 
@@ -789,11 +833,7 @@ def _extract_email_from_person_block(block: str) -> str | None:
 
 def extract_cre_email(authors_r: str) -> str | None:
     """Extract the maintainer (cre) email from Authors@R field."""
-    person_blocks = re.findall(
-        r'person\s*\((?:[^()]*|\((?:[^()]*|\([^()]*\))*\))*\)',
-        authors_r, re.DOTALL,
-    )
-    for block in person_blocks:
+    for block in _person_call_blocks(authors_r):
         if '"cre"' in block or "'cre'" in block:
             email = _extract_email_from_person_block(block)
             if email:
@@ -801,13 +841,92 @@ def extract_cre_email(authors_r: str) -> str | None:
     return None
 
 
+AUTHORS_R_ALLOWED_CALLS = {"person", "c", "list", "paste", "paste0", "as.person"}
+
+
+def scan_authors_r_calls(authors_r: str) -> tuple[list[str], bool]:
+    """Tokenize Authors@R (without evaluating it) into called function names.
+
+    Returns (call names in order of appearance, whether ORCID = is passed
+    directly to person()). String contents are skipped; pkg::fn( counts as fn.
+    """
+    calls: list[str] = []
+    orcid_in_person = False
+    stack: list[str | None] = []  # call name per open paren (None for grouping parens)
+    text = authors_r
+    n = len(text)
+    i = 0
+    while i < n:
+        ch = text[i]
+        if ch in "\"'`":
+            j = i + 1
+            while j < n and text[j] != ch:
+                j += 2 if text[j] == "\\" else 1
+            i = j + 1
+            continue
+        if ch.isdigit():
+            m = re.match(r'[0-9][0-9.eEL]*', text[i:])
+            i += len(m.group(0))
+            continue
+        m = re.match(r'[A-Za-z.][A-Za-z0-9._]*', text[i:])
+        if m:
+            name = m.group(0)
+            k = i + len(name)
+            while k < n and text[k] in " \t\n":
+                k += 1
+            if text.startswith("::", k):
+                i = k + (3 if text.startswith(":::", k) else 2)
+                continue
+            if k < n and text[k] == "(":
+                calls.append(name)
+                stack.append(name)
+                i = k + 1
+                continue
+            if (name == "ORCID" and k < n and text[k] == "=" and text[k + 1:k + 2] != "="
+                    and stack and stack[-1] == "person"):
+                orcid_in_person = True
+            i = k
+            continue
+        if ch == "(":
+            stack.append(None)
+        elif ch == ")" and stack:
+            stack.pop()
+        i += 1
+    return calls, orcid_in_person
+
+
+def _person_call_blocks(authors_r: str) -> list[str]:
+    """Return each `person(...)` call in Authors@R, with balanced parentheses.
+
+    Scans linearly and skips quoted strings. A regex with nested quantifiers
+    backtracks exponentially on deeply nested Authors@R fields (e.g. Matrix).
+    """
+    blocks = []
+    for m in re.finditer(r'\bperson\s*\(', authors_r):
+        depth, i, quote = 0, m.end() - 1, None
+        while i < len(authors_r):
+            ch = authors_r[i]
+            if quote:
+                if ch == "\\":
+                    i += 1
+                elif ch == quote:
+                    quote = None
+            elif ch in "\"'":
+                quote = ch
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    blocks.append(authors_r[m.start():i + 1])
+                    break
+            i += 1
+    return blocks
+
+
 def _has_cre_without_email(authors_r: str) -> bool:
     """Check if there is a person with cre role but no email argument."""
-    person_blocks = re.findall(
-        r'person\s*\((?:[^()]*|\((?:[^()]*|\([^()]*\))*\))*\)',
-        authors_r, re.DOTALL,
-    )
-    for block in person_blocks:
+    for block in _person_call_blocks(authors_r):
         if '"cre"' in block or "'cre'" in block:
             email = _extract_email_from_person_block(block)
             if not email:
@@ -1062,6 +1181,31 @@ def check_description_fields(path: Path, desc: dict) -> list[Finding]:
                 cran_says="Non-ASCII characters in DESCRIPTION."
             ))
 
+    # DESC-16: Authors@R may only call person/c/list/paste/paste0/as.person
+    if authors_r:
+        calls, orcid_in_person = scan_authors_r_calls(authors_r)
+        for name in dict.fromkeys(c for c in calls if c not in AUTHORS_R_ALLOWED_CALLS):
+            hint = ""
+            if name == "comment":
+                hint = " Use comment = c(ORCID = \"...\") inside person() instead of comment(...)."
+            elif name == "personList":
+                hint = " Replace personList() with c()."
+            findings.append(Finding(
+                rule_id="DESC-16", severity="note",
+                title=f"Non-whitelisted call in Authors@R: {name}()",
+                message=f"Authors@R calls {name}(...), which R flags as possibly unsafe and R CMD build/INSTALL may refuse.{hint}",
+                file=desc_file,
+                cran_says="Malformed Authors@R field: Found the following possibly unsafe calls. Please only use calls to 'person', 'c', 'list', 'paste', 'paste0'."
+            ))
+        if orcid_in_person:
+            findings.append(Finding(
+                rule_id="DESC-16", severity="note",
+                title="ORCID passed directly to person() in Authors@R",
+                message="ORCID = ... is not a person() argument. Use comment = c(ORCID = \"0000-...\").",
+                file=desc_file,
+                cran_says="Malformed Authors@R field."
+            ))
+
     # CODE-17: UseLTO causes CPU time NOTE
     if "UseLTO" in desc:
         findings.append(Finding(
@@ -1101,6 +1245,8 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
         desc = {}
     findings = []
     r_files = find_r_files(path)
+    own_pkg = desc.get("Package", "")
+    own_ns_pattern = r'(?<![\w.])' + re.escape(own_pkg) + r':::' if own_pkg else ""
 
     for rf in r_files:
         rel = str(rf.relative_to(path))
@@ -1253,6 +1399,18 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                         title=f"::: access to internal {m.group(1)} function",
                         message="Must not use ::: to access unexported objects from base packages.",
                         file=rel, line=lnum,
+                    ))
+
+        # NS-09: ::: into the package's own namespace
+        if own_ns_pattern:
+            for lnum, line in scan_file(rf, own_ns_pattern):
+                if re.search(own_ns_pattern, strip_r_strings_and_comment(line)):
+                    findings.append(Finding(
+                        rule_id="NS-09", severity="note",
+                        title=f"::: call to the package's own namespace ({own_pkg}:::)",
+                        message=f"Call internal functions directly by name, not via {own_pkg}:::: `{line[:80]}`",
+                        file=rel, line=lnum,
+                        cran_says="There are ::: calls to the package's namespace in its code. A package almost never needs to use ::: for its own objects."
                     ))
 
         # CODE-13: install.packages() in code
@@ -1458,6 +1616,16 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                         file=rel, line=lnum,
                     ))
 
+            # COMP-15: pragmas that silence compiler diagnostics
+            for lnum, line in scan_file(sf, r'^\s*#\s*pragma\s+(?:GCC|clang)\s+diagnostic\s+ignored\b'):
+                findings.append(Finding(
+                    rule_id="COMP-15", severity="warning",
+                    title="Compiler diagnostics suppressed by #pragma",
+                    message=f"Fix the code instead of silencing warnings: `{line.strip()[:80]}`",
+                    file=rel, line=lnum,
+                    cran_says="Packages should not attempt to disable compiler diagnostics."
+                ))
+
             # COMP-07: Strict C function prototypes
             if ext in (".c", ".h"):
                 for lnum, line in scan_file(sf, r'\b\w+\s*\(\s*\)\s*[{;]'):
@@ -1558,6 +1726,39 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                     message=f"Remove CXX_STD line — R defaults to C++17+: `{line.strip()[:80]}`",
                     file=rel, line=lnum,
                     cran_says="C++11/C++14 specifications are deprecated."
+                ))
+
+    for makevars in find_makevars_files(path):
+        rel = str(makevars.relative_to(path))
+        for lnum, line in scan_file(makevars, r'.'):
+            if is_in_comment(line):
+                continue
+            # COMP-13: Obsolete Rcpp linker/compiler flags
+            m = re.search(r'Rcpp:::LdFlags\b|\bRcppLdFlags\b|\bRcppLdPath\b', line)
+            if m:
+                findings.append(Finding(
+                    rule_id="COMP-13", severity="warning",
+                    title=f"Obsolete Rcpp flag helper: {m.group(0)}",
+                    message=f"Delete this line; LinkingTo: Rcpp is all that is needed: `{line[:80]}`",
+                    file=rel, line=lnum,
+                    cran_says="'Rcpp:::LdFlags' has not been needed since 2013 (!!) and may get removed in 2027. Please update your 'Makevars'."
+                ))
+            elif re.search(r'Rcpp:::CxxFlags\b', line):
+                findings.append(Finding(
+                    rule_id="COMP-13", severity="note",
+                    title="Obsolete Rcpp flag helper: Rcpp:::CxxFlags",
+                    message=f"Not needed with LinkingTo: Rcpp; remove it: `{line[:80]}`",
+                    file=rel, line=lnum,
+                ))
+            # COMP-15: Flags that silence compiler diagnostics
+            flags = re.findall(r'(?<![\w-])(-Wno-[\w=+-]+|-w|-fpermissive)(?![\w=+-])', line)
+            if flags:
+                findings.append(Finding(
+                    rule_id="COMP-15", severity="warning",
+                    title="Compiler diagnostics suppressed in Makevars",
+                    message=f"Remove {', '.join(flags)} and fix the warnings (or patch the upstream headers): `{line[:80]}`",
+                    file=rel, line=lnum,
+                    cran_says="Packages should not attempt to disable compiler diagnostics."
                 ))
 
     # COMP-05: Configure script portability
@@ -1935,6 +2136,31 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                     file=rel, line=i,
                     cran_says="Package must work on all major platforms."
                 ))
+
+    # PLAT-03: Hard-coded macOS Big Sur arm64 paths/targets
+    plat03_files = sorted(f for f in path.glob("configure*") if f.is_file())
+    plat03_files += find_makevars_files(path)
+    if (path / "tools").is_dir():
+        plat03_files += sorted(f for f in (path / "tools").iterdir() if f.is_file())
+    for pf in plat03_files:
+        rel = str(pf.relative_to(path))
+        for lnum, line in scan_file(pf, r'darwin20/arm64|big-sur-arm64|macosx-version-min=1[0-3](?!\d)'):
+            if is_in_comment(line):
+                continue
+            m = re.search(r'darwin20/arm64|(?:mac\.binary\.)?big-sur-arm64', line)
+            if m:
+                target = m.group(0)
+            elif "arm64" in line:
+                target = re.search(r'[^\s"\']*macosx-version-min=1[0-3][^\s"\']*', line).group(0)
+            else:
+                continue  # Intel builds still target macOS 11
+            findings.append(Finding(
+                rule_id="PLAT-03", severity="warning",
+                title=f"Hard-coded macOS Big Sur arm64 target: {target}",
+                message=f"CRAN arm64 builds target macOS 14 (darwin23/arm64, sonoma-arm64). Derive paths from R CMD config or pkg-config: `{line[:80]}`",
+                file=rel, line=lnum,
+                cran_says="R 4.6.0 CRAN arm64 builds use Xcode 26.0.1, macOS 14 target and 14.4 SDK with package type mac.binary.sonoma-arm64."
+            ))
 
     # NET-03: Rate Limit Policy (heuristic reminder)
     has_network_code = False
@@ -2365,6 +2591,93 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
                             cran_says="Function references should include parentheses."
                         ))
                         break  # One finding per file
+
+    # DOC-12 to DOC-15: per-Rd checks for R 4.6-era syntax and section rules
+    depends_r = parse_depends_r_version(desc)
+    own_pkg = desc.get("Package", "")
+    vignette_stems = {vf.stem for vf in _find_vignette_files(path)}
+    new_rd_syntax = r'\\linkS4class\[|\\linkS4methods\{|\\manual\{|\\bibcite[tp]\{|\\bibshow\{|\\bibinfo\{'
+    for rd in rd_files:
+        rel = str(rd.relative_to(path))
+        try:
+            raw_lines = rd.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            continue
+        # Drop Rd comments (unescaped % to end of line)
+        rd_lines = [re.sub(r'(?<!\\)%.*', '', ln) for ln in raw_lines]
+
+        # DOC-12: Scheme-less \href/\url targets that look like relative paths
+        for lnum, line in enumerate(rd_lines, 1):
+            for m in re.finditer(r'\\(?:href|url)\{([^{}]*)\}', line):
+                target = m.group(1).strip()
+                if not target or target.startswith("#") or re.match(r'[A-Za-z][A-Za-z0-9+.-]*:', target):
+                    continue
+                first_seg = target.split("/", 1)[0]
+                is_relative = target.startswith(("./", "../")) or ("/" in target and "." not in first_seg)
+                if not is_relative:
+                    continue
+                # ../doc/<file> resolves when the package installs that file
+                dm = re.match(r'\.\./(?:\.\./' + re.escape(own_pkg) + r'/)?doc/([^/#?]+)', target)
+                if dm:
+                    doc_file = dm.group(1)
+                    if ((path / "inst" / "doc" / doc_file).exists()
+                            or (Path(doc_file).suffix in VIGNETTE_OUTPUT_EXTS and Path(doc_file).stem in vignette_stems)):
+                        continue
+                findings.append(Finding(
+                    rule_id="DOC-12", severity="note",
+                    title="Possibly invalid relative URL in Rd",
+                    message=f"'{target}' has no scheme and may not resolve in the installed help system. Use \\link[pkg]{{topic}}, vignette(\"name\", package = \"pkg\") text, or an absolute https:// URL.",
+                    file=rel, line=lnum,
+                    cran_says="checking relative paths in package URLs ... NOTE Found the following (possibly) invalid URLs"
+                ))
+
+        # DOC-13: \bibcitet/\bibcitep keys not covered by a \bibshow
+        cited: dict[str, int] = {}
+        shown: set[str] = set()
+        for lnum, line in enumerate(rd_lines, 1):
+            for m in re.finditer(r'\\bibcite[tp]\{([^{}]*)\}', line):
+                for key in m.group(1).split(","):
+                    if key.strip():
+                        cited.setdefault(key.strip(), lnum)
+            for m in re.finditer(r'\\bibshow\{([^{}]*)\}', line):
+                shown.update(k.strip() for k in m.group(1).split(","))
+        if cited and "*" not in shown:
+            missing = [k for k in cited if k not in shown]
+            if missing:
+                findings.append(Finding(
+                    rule_id="DOC-13", severity="note",
+                    title=f"Bibentries cited but not shown in {rd.name}",
+                    message=f"Cited with \\bibcitet/\\bibcitep but not in any \\bibshow: {', '.join(missing)}. Add \\references{{\\bibshow{{*}}}}.",
+                    file=rel, line=cited[missing[0]],
+                    cran_says=f"Bibentries cited but not shown in Rd file '{rd.name}'"
+                ))
+
+        # DOC-14: New R 4.6.0 Rd syntax needs Depends: R (>= 4.6.0)
+        if depends_r is None or depends_r < (4, 6, 0):
+            for lnum, line in enumerate(rd_lines, 1):
+                m = re.search(new_rd_syntax, line)
+                if m:
+                    declared = "no R version in Depends" if depends_r is None else "Depends: R (>= " + ".".join(map(str, depends_r)) + ")"
+                    findings.append(Finding(
+                        rule_id="DOC-14", severity="warning",
+                        title=f"R 4.6.0 Rd syntax without Depends: R (>= 4.6.0) in {rd.name}",
+                        message=f"{m.group(0).rstrip('[{')} requires R >= 4.6.0 but DESCRIPTION has {declared}.",
+                        file=rel, line=lnum,
+                        cran_says="Packages with the new syntax need to formally depend on 'R >= 4.6.0'."
+                    ))
+                    break  # One finding per file
+
+        # DOC-15: \arguments without \usage
+        args_line = next((i for i, ln in enumerate(rd_lines, 1) if re.search(r'\\arguments\s*\{', ln)), 0)
+        is_internal = any(re.search(r'\\keyword\{\s*internal\s*\}', ln) for ln in rd_lines)
+        if args_line and not is_internal and not any(re.search(r'\\usage\s*\{', ln) for ln in rd_lines):
+            findings.append(Finding(
+                rule_id="DOC-15", severity="note",
+                title=f"\\arguments without \\usage in {rd.name}",
+                message="Add a \\usage section (roxygen: @usage), or describe the options in \\describe{} instead of \\arguments{}.",
+                file=rel, line=args_line,
+                cran_says="\\arguments should not be documented without \\usage."
+            ))
 
     return findings
 

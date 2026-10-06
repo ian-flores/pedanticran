@@ -3,10 +3,12 @@ Type: Package
 Title: Edge Cases for False-Positive Testing
 Version: 0.1.0
 Authors@R: c(
-    person("Jane", "Doe", email = "jane.doe@gmail.com", role = c("aut", "cre", "cph"))
+    person("Jane", "Doe", email = "jane.doe@gmail.com", role = c("aut", "cre", "cph"),
+           comment = c(ORCID = "0000-0002-1825-0097"))
     )
 Description: Tests false-positive filtering in the CRAN checker.
     This package has patterns that look problematic but are actually fine.
+Depends: R (>= 4.6.0)
 License: MIT + file LICENSE
 Encoding: UTF-8
 RoxygenNote: 7.3.1

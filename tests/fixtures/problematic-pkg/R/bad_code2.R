@@ -5,3 +5,8 @@ cleanup <- function() {
     # CODE-09: rm(list = ls())
     rm(list = ls())
 }
+
+# NS-09: ::: into the package's own namespace
+call_own_internal <- function(x) {
+  badpkg:::internal_helper(x)
+}

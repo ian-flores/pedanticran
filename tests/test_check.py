@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import time
+
 import pytest
 
 # Import the checker module (conftest.py sets up sys.path)
@@ -281,6 +283,20 @@ class TestEmailHelpers:
     def test_has_cre_without_email(self):
         authors = 'person("Jane", "Doe", role = c("aut", "cre"))'
         assert check._has_cre_without_email(authors)
+
+    def test_has_cre_deeply_nested_authors_is_fast(self):
+        # Matrix-style Authors@R: four levels of nested calls inside person().
+        # The old regex backtracked exponentially here and never finished.
+        ctb = ('person("T", "D", role = "ctb", comment = c(ORCID = "0000", "libs", '
+               '"see dir(system.file(\\"doc\\", package=\\"M\\"), pattern=\\"L\\")")),\n')
+        authors = ('c(person("M", "M", role = c("aut", "cre"), email = "m@example.org"),\n'
+                   + ctb * 30
+                   + 'person("A", "B", role = "ctb", comment = dir(system.file(c("a", "b"))), extra = list(x = list(y = f(g(1))))))')
+        start = time.monotonic()
+        assert not check._has_cre_without_email(authors)
+        assert check.extract_cre_email(authors) == "m@example.org"
+        assert time.monotonic() - start < 1
+        assert len(check._person_call_blocks(authors)) == 32
 
     def test_has_cre_with_email(self):
         authors = 'person("Jane", "Doe", email = "jane@test.org", role = c("aut", "cre"))'
@@ -3600,3 +3616,163 @@ class TestHttpHeadNoRedirect:
             mock_opener.return_value.open.side_effect = error
             status, location = check._http_head_no_redirect("https://example.com/gone")
         assert status == 410
+
+
+# ============================================================================
+# 2026 Rules: COMP-13, COMP-15, NS-09, DESC-16, DOC-12..15, PLAT-03
+# ============================================================================
+
+
+NEW_2026_RULES = {
+    "COMP-13", "COMP-15", "NS-09", "DESC-16",
+    "DOC-12", "DOC-13", "DOC-14", "DOC-15", "PLAT-03",
+}
+
+
+def _all_offline_findings(pkg):
+    desc = check.parse_description(pkg)
+    findings = []
+    for fn in (check.check_description_fields, check.check_code, check.check_documentation,
+               check.check_structure, check.check_system_requirements):
+        findings.extend(fn(pkg, desc))
+    return findings
+
+
+class TestNew2026Rules:
+    """Fixture and synthetic tests for the R 4.6-era rules."""
+
+    def _by_rule(self, pkg, rule_id):
+        return [f for f in _all_offline_findings(pkg) if f.rule_id == rule_id]
+
+    def _desc_pkg(self, tmp_path, authors_r):
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "DESCRIPTION").write_text(
+            "Package: testpkg\n"
+            "Title: A Test Package for Unit Testing\n"
+            "Version: 0.1.0\n"
+            f"Authors@R: {authors_r}\n"
+            "Description: Provides test functionality for unit testing purposes.\n"
+            "    This is a second sentence for the description field.\n"
+            "License: MIT + file LICENSE\n"
+        )
+        return pkg
+
+    # --- Fixture packages ---
+
+    @pytest.mark.parametrize("pkg_name", ["clean-pkg", "edge-cases"])
+    def test_new_rules_silent_on_clean_fixtures(self, pkg_name):
+        hits = [(f.rule_id, f.file, f.line) for f in _all_offline_findings(FIXTURES_DIR / pkg_name)
+                if f.rule_id in NEW_2026_RULES]
+        assert hits == []
+
+    def test_comp13_problematic(self, problematic_pkg):
+        comp13 = self._by_rule(problematic_pkg, "COMP-13")
+        assert [(f.severity, f.line) for f in comp13] == [("warning", 1), ("note", 2)]
+        assert all(f.file == "src/Makevars" for f in comp13)
+
+    def test_comp15_problematic(self, problematic_pkg):
+        comp15 = self._by_rule(problematic_pkg, "COMP-15")
+        locs = sorted((f.file, f.line) for f in comp15)
+        assert locs == [("src/Makevars", 2), ("src/Makevars", 3), ("src/quiet.cpp", 1)]
+        assert all(f.severity == "warning" for f in comp15)
+        assert any("-Wno-array-bounds" in f.message and "-fpermissive" in f.message for f in comp15)
+
+    def test_plat03_problematic(self, problematic_pkg):
+        plat03 = self._by_rule(problematic_pkg, "PLAT-03")
+        assert sorted((f.file, f.line) for f in plat03) == [
+            ("tools/winlibs.R", 1), ("tools/winlibs.R", 2), ("tools/winlibs.R", 3)]
+        assert all(f.severity == "warning" for f in plat03)
+
+    def test_ns09_problematic(self, problematic_pkg):
+        ns09 = self._by_rule(problematic_pkg, "NS-09")
+        assert len(ns09) == 1
+        assert ns09[0].file == "R/bad_code2.R"
+        assert ns09[0].severity == "note"
+
+    def test_doc12_problematic(self, problematic_pkg):
+        doc12 = self._by_rule(problematic_pkg, "DOC-12")
+        assert [(f.file, f.line) for f in doc12] == [("man/bib_cites.Rd", 6)]
+        assert "../doc/intro.html" in doc12[0].message
+
+    def test_doc13_problematic(self, problematic_pkg):
+        doc13 = self._by_rule(problematic_pkg, "DOC-13")
+        assert len(doc13) == 1
+        assert "R:Jones2021" in doc13[0].message
+        assert "R:Smith2020" not in doc13[0].message
+
+    def test_doc14_problematic(self, problematic_pkg):
+        doc14 = self._by_rule(problematic_pkg, "DOC-14")
+        assert [f.file for f in doc14] == ["man/bib_cites.Rd"]
+        assert doc14[0].severity == "warning"
+
+    def test_doc15_problematic(self, problematic_pkg):
+        doc15 = self._by_rule(problematic_pkg, "DOC-15")
+        assert [(f.file, f.line) for f in doc15] == [("man/js_overview.Rd", 4)]
+
+    # --- DESC-16: Authors@R whitelisted calls ---
+
+    def test_desc16_comment_call(self, tmp_path):
+        pkg = self._desc_pkg(
+            tmp_path,
+            'person("A", "B", email = "a.b@gmail.com", role = c("aut", "cre"), comment("Butterfly"))')
+        desc16 = self._by_rule(pkg, "DESC-16")
+        assert len(desc16) == 1
+        assert "comment(" in desc16[0].message
+
+    def test_desc16_orcid_direct_arg(self, tmp_path):
+        pkg = self._desc_pkg(
+            tmp_path,
+            'person("A", "B", email = "a.b@gmail.com", role = c("aut", "cre"), ORCID = "0000-0002-1825-0097")')
+        desc16 = self._by_rule(pkg, "DESC-16")
+        assert len(desc16) == 1
+        assert "ORCID" in desc16[0].message
+
+    def test_desc16_other_calls(self, tmp_path):
+        pkg = self._desc_pkg(
+            tmp_path,
+            'personList(person("A", "B", role = c("aut", "cre")), as.person(readLines("AUTHORS")))')
+        names = sorted(f.title for f in self._by_rule(pkg, "DESC-16"))
+        assert len(names) == 2
+        assert any("personList" in n for n in names)
+        assert any("readLines" in n for n in names)
+
+    def test_desc16_allowed_calls_ok(self, tmp_path):
+        pkg = self._desc_pkg(
+            tmp_path,
+            'c(person(given = paste0("A", "n"), family = paste("B", "C"), role = c("aut", "cre"), '
+            'comment = c(ORCID = "0000-0002-1825-0097", affiliation = "Uni (Dept)")), '
+            'utils::person("D", "E, comment(x)", role = "ctb"), list(as.person("F G")))')
+        assert self._by_rule(pkg, "DESC-16") == []
+
+    # --- Synthetic negatives / edge cases ---
+
+    def test_doc14_satisfied_by_r_46(self, tmp_path):
+        pkg = self._desc_pkg(tmp_path, 'person("A", "B", role = c("aut", "cre"))')
+        with open(pkg / "DESCRIPTION", "a") as fh:
+            fh.write("Depends: R (>= 4.6.1), methods\n")
+        (pkg / "man").mkdir()
+        (pkg / "man" / "x.Rd").write_text("\\name{x}\\title{X}\\description{\\manual{R-exts}{Foo}}\n")
+        assert self._by_rule(pkg, "DOC-14") == []
+        (pkg / "DESCRIPTION").write_text(
+            (pkg / "DESCRIPTION").read_text().replace("4.6.1", "4.5.2"))
+        assert len(self._by_rule(pkg, "DOC-14")) == 1
+
+    def test_doc12_resolvable_vignette_link_ok(self, tmp_path):
+        pkg = self._desc_pkg(tmp_path, 'person("A", "B", role = c("aut", "cre"))')
+        (pkg / "man").mkdir()
+        (pkg / "vignettes").mkdir()
+        (pkg / "vignettes" / "intro.Rmd").write_text("---\ntitle: Intro\n---\n")
+        (pkg / "man" / "x.Rd").write_text(
+            "\\name{x}\n\\description{\n\\href{../doc/intro.html}{intro}\n\\url{./missing/page.html}\n}\n")
+        doc12 = self._by_rule(pkg, "DOC-12")
+        assert [f.line for f in doc12] == [4]
+
+    def test_comp13_makevars_win_and_ucrt(self, tmp_path):
+        pkg = self._desc_pkg(tmp_path, 'person("A", "B", role = c("aut", "cre"))')
+        (pkg / "src").mkdir()
+        (pkg / "src" / "Makevars.win").write_text('PKG_LIBS = $(shell Rscript -e "Rcpp:::RcppLdFlags()")\n')
+        (pkg / "src" / "Makevars.ucrt").write_text("PKG_LIBS = `Rscript -e 'RcppLdPath()'`\n")
+        comp13 = self._by_rule(pkg, "COMP-13")
+        assert sorted(f.file for f in comp13) == ["src/Makevars.ucrt", "src/Makevars.win"]
+        assert all(f.severity == "warning" for f in comp13)
