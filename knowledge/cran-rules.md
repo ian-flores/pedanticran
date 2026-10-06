@@ -2,7 +2,7 @@
 
 Every rule includes: what CRAN requires, how they reject it (verbatim feedback), how to detect it, and how to fix it.
 
-Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Consortium), ThinkR prepare-for-cran, devtools/usethis release checklist, community experience, R-package-devel mailing list archives (2015-2025), R NEWS for R 3.2 through R 4.5.
+Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Consortium), ThinkR prepare-for-cran, devtools/usethis release checklist, community experience, R-package-devel and r-devel mailing list archives (2015 through September 2026), CRAN policy SVN history and `X-CRAN-Comment` archival notes, R NEWS for R 3.2 through R 4.6.1 (plus R-devel), and the R sources of `tools/R/check.R`. Coverage: 2015 through September 2026.
 
 ---
 
@@ -150,6 +150,26 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Replace all smart/curly quotes with straight ASCII quotes (' and ").
 - **Files**: `DESCRIPTION`
 
+### DESC-16: Authors@R Must Use Only Whitelisted Calls
+
+- **Severity**: NOTE (R CMD check); fails R CMD build/INSTALL run on a source directory with R-devel/R-4-6-branch
+- **Rule**: `Authors@R` may only contain calls to `person`, `c`, `list`, `paste`, `paste0` (`as.person` was whitelisted later). Anything else, typically `comment(ORCID = ...)` or `ORCID = ...` inside `person()`, is flagged as possibly unsafe. Kurt Hornik plans to stop evaluating non-whitelisted calls altogether, and CITATION files are expected to get similar restrictions (see INST-02).
+- **CRAN says**: "* checking DESCRIPTION meta-information ... NOTE / Malformed Authors@R field: / Found the following possibly unsafe calls: / comment("SwissMarbledWhite") / Please only use calls to 'person', 'c', 'list', 'paste', 'paste0'." (Kurt Hornik, r-devel, 2026-04-11, https://stat.ethz.ch/pipermail/r-devel/2026-April/084480.html). Ivan Krylov: on a source directory R CMD build and R CMD INSTALL call the same check, "which fails the build" (https://stat.ethz.ch/pipermail/r-devel/2026-April/084491.html).
+- **Detection**: Parse `Authors@R` with `parse()` (do not eval). Walk the call tree and flag any function name outside {person, c, list, paste, paste0, as.person}. Specifically flag `comment(` and a named `ORCID =` argument to `person()`.
+- **Fix**: Use `person("First", "Last", email = "...", role = c("aut", "cre"), comment = c(ORCID = "0000-..."))`. Replace `personList()` with `c()`.
+- **Files**: `DESCRIPTION`
+- **Since**: R-devel r89866 (2026-04-10), merged into R-4-6-branch; about 20 CRAN packages affected at introduction
+
+### DESC-17: Declare an Honest Minimum R Version
+
+- **Severity**: RECOMMENDED
+- **Rule**: `Depends: R (>= x.y.z)` means "will not work below this". It does not mean "untested below this". Do not inflate it, since it cascades to every reverse dependency. Avoid a non-zero patch level unless a patch release fixed a bug you rely on (ABI compatibility is guaranteed across patch versions). Never declare versions that do not exist (e.g. 3.60).
+- **CRAN says**: Simon Urbanek (R-package-devel, 2026-04): "Robin may be misunderstanding the purpose of that declaration as he seem to see it as "I didn't test it" while it really means "you're not allowed to install it, it won't work". gsl actually works perfectly fine (i.e. passes all checks with OK) at from R 3.2.0 on, so the declaration is just blatantly wrong - it should read (R >= 3.2.0)." (https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012357.html) / "if the bug affects your use case then you should use 4.1.3 otherwise 4.1.0. Normally, ABI compatibility is guaranteed across all patch versions - hence the comment to make sure the requirement is not unnecessary" (https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012378.html)
+- **Detection**: Parse `Depends: R (>= ...)`. Flag a non-existent version (e.g. 3.8, 3.10, 3.21, 3.50, 3.60, 3.63), a patch level != 0, or a version newer than r-oldrel without an obvious trigger. Some features do justify a specific minimum, e.g. `|>` or the R 4.6.0 Rd syntax (DOC-14).
+- **Fix**: Set the lowest version where checks pass. In C code, use `#if R_VERSION >= R_Version(x,y,0)` instead of raising the R requirement.
+- **Files**: `DESCRIPTION`
+- **Since**: Writing R Extensions guidance is long-standing; the gsl `R (>= 4.5.0)` cascade (200+ reverse dependencies) was discussed in April 2026
+
 ---
 
 ## Category: Code Behavior
@@ -188,7 +208,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### CODE-04: Restore options()/par()/setwd() with on.exit()
 
 - **Severity**: REJECTION
-- **Rule**: If a function changes `options()`, `par()`, or `setwd()`, it must immediately restore them using `on.exit()`.
+- **Rule**: If a function changes `options()`, `par()`, or `setwd()`, it must immediately restore them using `on.exit()`. Restore every graphics parameter you set explicitly, including mfrow/mfcol/oma ("you have to restore any parameters you set explicitly, which does include mfrow and similar as well", Simon Urbanek, 2026-07-09, https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012442.html). Coordinate parameters set by plot.window (usr, xaxp, yaxp) are expected to change. If users need to add to a multi-panel plot, return the needed settings (Uwe Ligges: "reset everything but return a list of parameters that need to be set again if you want to, e.g., add to the plot generated with modified parameters", https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012443.html).
 - **CRAN says**: "Please make sure that you do not change the user's options, par or working directory. If you really have to do so within functions, please ensure with an immediate call of on.exit() that the settings are reset when the function is exited."
 - **Detection**: Find calls to `options(`, `par(`, `setwd(` in function bodies. Check if followed by corresponding `on.exit(` call. The `on.exit()` must come immediately after, not later in the function.
 - **Fix**: Add save-and-restore pattern:
@@ -196,6 +216,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
   old <- options(warn = 1)
   on.exit(options(old), add = TRUE)
   ```
+  Save only what you change: `op <- par(mfrow = c(1, 2)); on.exit(par(op), add = TRUE)`.
 - **Files**: `R/*.R`
 - **Since**: Pre-2015 — consistently enforced throughout all studied periods
 
@@ -212,9 +233,9 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### CODE-06: Write Only to tempdir()
 
 - **Severity**: REJECTION
-- **Rule**: Must not write to user's home directory, working directory, or package directory. Only `tempdir()` and `tempfile()` are allowed for temporary files. For persistent user data, use `tools::R_user_dir()` (R >= 4.0) with user consent.
-- **CRAN says**: "Please ensure that your functions do not write by default or in your examples/vignettes/tests in the user's home filespace (including the package directory and getwd()). This is not allowed by CRAN policies."
-- **Detection**: Find `write*`, `save*`, `writeLines`, `cat(file=`, `sink(`, `pdf(`, `png(`, etc. where the path is not derived from `tempdir()`, `tempfile()`, or `R_user_dir()`. Look for hardcoded paths, `getwd()`, `~`, `"."`.
+- **Rule**: Must not write to user's home directory, working directory, or package directory. Only `tempdir()` and `tempfile()` are allowed for temporary files. For persistent user data, use `tools::R_user_dir()` (R >= 4.0) with user consent. `tools::R_user_dir()` caches must be small by default and actively pruned, and must not be created or modified during R CMD check (examples, tests, vignettes). R CMD check reports 'checking for new files in some other directories ... NOTE Found the following files/directories: ~/.cache/<pkg>/...'. See CODE-24.
+- **CRAN says**: "Please ensure that your functions do not write by default or in your examples/vignettes/tests in the user's home filespace (including the package directory and getwd()). This is not allowed by CRAN policies." / "Archived on 2026-06-01 for policy violation. . Stores > 100 MB in ~/.cache/R and does not clean up." (nomesbr, CRAN `X-CRAN-Comment`)
+- **Detection**: Find `write*`, `save*`, `writeLines`, `cat(file=`, `sink(`, `pdf(`, `png(`, etc. where the path is not derived from `tempdir()`, `tempfile()`, or `R_user_dir()`. Look for hardcoded paths, `getwd()`, `~`, `"."`. Flag `R_user_dir(` usage without (a) a size cap/pruning routine and (b) a check-time guard (e.g. defaulting to `tempdir()` when `!interactive()` or when `_R_CHECK_PACKAGE_NAME_` is set).
 - **Fix**: Replace file paths with `tempfile()` or `file.path(tempdir(), "name")`. For user data, use `tools::R_user_dir("pkgname", which = "data")` (R >= 4.0).
 - **Files**: `R/*.R`, `tests/**/*.R`, `vignettes/*.Rmd`
 - **Since**: Pre-2015 — consistently enforced; R 4.0.0 (2020) introduced `tools::R_user_dir()` as the sanctioned persistent storage alternative; CRAN enforced migration from `rappdirs` in late 2021
@@ -253,8 +274,8 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 
 - **Severity**: NOTE → REJECTION
 - **Rule**: Package must not use more than 2 cores in examples, vignettes, or tests. CRAN runs many checks in parallel.
-- **CRAN says**: "Please ensure that you do not use more than 2 cores in your examples, vignettes, etc."
-- **Detection**: Find `parallel::detectCores()`, `makeCluster(`, `mclapply(`, `future::plan(multisession`, etc. Check if core count is hardcoded > 2 or uses `detectCores()` without `min(..., 2)`.
+- **CRAN says**: "Please ensure that you do not use more than 2 cores in your examples, vignettes, etc." / "Archived on 2026-05-15 for policy violation. . Attempts to use all CPU cores." (lavDiag, CRAN `X-CRAN-Comment`)
+- **Detection**: Find `parallel::detectCores()`, `makeCluster(`, `mclapply(`, `future::plan(multisession`, etc. Check if core count is hardcoded > 2 or uses `detectCores()` without `min(..., 2)`. Flag threads spawned by embedded runtimes (TensorFlow/reticulate, OpenMP, BLAS) in vignettes. greta's vignette showed "Re-building vignettes had CPU time 4.1 times elapsed time" from TensorFlow threads (Feb 2026, https://stat.ethz.ch/pipermail/r-package-devel/2026q1/012257.html).
 - **Fix**: Cap cores: `ncores <- min(parallel::detectCores(), 2)`. Or use `getOption("mc.cores", 2L)`.
 - **Files**: `R/*.R`, `tests/**/*.R`, `vignettes/*.Rmd`, `man/*.Rd`
 - **Since**: Pre-2015 — consistently enforced throughout all studied periods
@@ -282,7 +303,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Severity**: REJECTION
 - **Rule**: Functions should not install packages. This makes examples slow and modifies the user's system.
 - **CRAN says**: "Please do not install packages in your functions, examples or vignettes."
-- **Detection**: Find `install.packages(`, `remotes::install_`, `devtools::install_` in R source (not in functions whose explicit purpose is installation).
+- **Detection**: Find `install.packages(`, `remotes::install_`, `devtools::install_` in R source (not in functions whose explicit purpose is installation). Scan *top-level* (non-assignment) calls in R/*.R, e.g. `library()`, `require()`, `install.packages()`, `options()`, or `lapply(pkgs, library, ...)`. R CMD check analyses the installed namespace, so these run at install time and evade its checks ("The check code by default uses tools:::.check_packages_used() on the code in the installed package, and hence cannot pick up top-level calls as these got processed when installing.", Kurt Hornik, r-devel 2026-06, https://stat.ethz.ch/pipermail/r-devel/2026-June/084612.html). Hornik is working on source-level detection.
 - **Fix**: Remove installation calls. Use `requireNamespace()` to check availability instead.
 - **Files**: `R/*.R`
 - **Since**: Pre-2015 — consistently enforced throughout all studied periods
@@ -371,6 +392,26 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Files**: `R/*.R`
 - **Since**: R 4.2.0 (2022) — upgraded from WARNING to ERROR; CRAN gave deadline of 2022-04-04 for packages to comply before R 4.2.0 release
 
+### CODE-23: No Divisive or Offensive Material (e.g., Political Slogans)
+
+- **Severity**: REJECTION (archival "for policy violation")
+- **Rule**: Packages must not contain or display material that might be considered divisive or give offence, such as political slogans. This applies to startup messages and banners, printed output, documentation, README (installed and shown in HTML help since R 4.6.0), DESCRIPTION, data, examples and vignettes. The policy gives no definition beyond "divisive or give offence".
+- **CRAN says**: Policy: "Packages should not contain nor display material which might be considered divisive or give offence, such as political slogans." / Archival: "Archived on 2026-07-28 for policy violation. . Anti-social behaviour, displaying a political message in its banner. Version 0.8.1 has been removed." (rim, CRAN `X-CRAN-Comment`)
+- **Detection**: Review flag only; never auto-fail. Scan `.onAttach`/`.onLoad` `packageStartupMessage()`/`message()`/`cat()` strings, `DESCRIPTION` Title/Description, `README.md`, `inst/` text and `R/*.R` string literals for slogan-like or non-package content (e.g. a curated keyword list; anything with "!" in a startup message). Report as "review manually".
+- **Fix**: Remove the material. Restrict startup messages to package-relevant information and keep them suppressible. Put non-technical statements on an external website, not in the package.
+- **Files**: `R/zzz.R`, `R/*.R`, `DESCRIPTION`, `README.md`, `man/*.Rd`, `vignettes/*`, `inst/*`
+- **Since**: CRAN policy SVN r6942 (committed 2026-09-02); on the live policy page by 2026-07-27 (page still labelled Rev 6875); first archival under it 2026-07-28
+
+### CODE-24: User Cache Must Be Bounded and Untouched by R CMD check
+
+- **Severity**: REJECTION (archival "for policy violation")
+- **Rule**: Files under `tools::R_user_dir()` (e.g. `~/.cache/R/<pkg>`) must be small by default, actively pruned, and not created or modified during examples, tests or vignettes run by R CMD check.
+- **CRAN says**: Policy: "packages may store user-specific data, configuration and cache files in their respective user directories obtained from tools::R_user_dir(), provided that by default sizes are kept as small as possible and the contents are actively managed (including removing outdated material)." / "Archived on 2026-06-01 for policy violation. . Stores > 100 MB in ~/.cache/R and does not clean up." (nomesbr) / "Archived on 2026-06-01 for policy violation. . Stores > 150 MB in ~/.cache/R and does not clean up." (rcldf) / Check NOTE: "* checking for new files in some other directories ... NOTE / Found the following files/directories: / '~/.cache/rsurvstat/022e3d1edce617738e145996fea14ed7.xml'" / Ivan Krylov (not CRAN team): "running R CMD check shouldn't create or modify user files (including the cache)." (https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012486.html)
+- **Detection**: Find `R_user_dir(`, `rappdirs::user_cache_dir(`, and literal `~/.cache`. Flag if (a) there is no pruning or max-size logic (no `unlink`/`file.remove` on the cache dir, no age or size check), or (b) the cache path is used by default in examples/tests/vignettes without redirecting to `tempdir()`.
+- **Fix**: Add a cache-size cap and expiry. Provide a `pkg_cache_clear()` function. In examples/tests set an option/env var pointing the cache to `tempdir()`, or skip caching when `!interactive()`. Declare `Depends: R (>= 4.0)` if using `R_user_dir()`.
+- **Files**: `R/*.R`, `tests/**`, `vignettes/*`, `man/*.Rd`
+- **Since**: Policy wording since the R 4.0 era; first size-based archivals 2026-06-01 (nomesbr, rcldf); rsurvstat given a 2026-08-21 deadline
+
 ---
 
 ## Category: Compiled Code (C/C++/Fortran)
@@ -395,12 +436,17 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 
 ### COMP-03: Non-API Entry Points
 
-- **Severity**: WARNING → REJECTION
-- **Rule**: R 4.5.0 upgraded some non-API entry point NOTEs to WARNINGs. R 4.6.0 will upgrade more. Using internal R API functions blocks submission.
-- **CRAN says**: "Found non-API calls to R: [function names]" (WARNING level).
-- **Detection**: Grep src/ for: IS_LONG_VEC, PRCODE, PRENV, PRVALUE, R_nchar, Rf_NonNullStringMatch, R_shallow_duplicate_attr, Rf_StringBlank, SET_TYPEOF, TRUELENGTH, XLENGTH_EX, XTRUELENGTH, VECTOR_PTR, R_tryWrap.
-- **Fix**: Replace with supported API equivalents. See Writing R Extensions manual.
+- **Severity**: WARNING → REJECTION; compile ERROR for hidden/removed entry points
+- **Rule**: R 4.5.0 upgraded some non-API entry point NOTEs to WARNINGs. R 4.6.0 (2026-04-24) upgraded more, hid ~33 entry points (compilation now fails, not just a check finding) and removed VECTOR_PTR and Rf_isFrame. The installed R 4.6.0 headers now declare only the C API as defined in Writing R Extensions, and non-API *variables* now give NOTEs. `R_MissingArg` was re-added to the variables API and no longer gives a NOTE. Packages that do not implement new connection types must not use `Rconnection` internals. Using internal R API functions blocks submission.
+- **CRAN says**: "Found non-API calls to R: [function names]" (WARNING level). R 4.6.0 NEWS: "R CMD check 'NOTE's on the use of these non-API entry points have been upgraded to 'WARNING's in preparation for removing declarations and, where possible, hiding these entry points: R_nchar, R_tryWrap, Rf_GetOption, R_lsInternal, BODY, FORMALS, CLOENV, SET_TYPEOF, STRING_PTR, R_duplicate_attr, getConnection, R_data_class, STRING_PTR, SET_OBJECT, ATTRIB, SET_ATTRIB, Rf_findVarInFrame3." / "Packages using any non-API variables will now receive check 'NOTE's." / Luke Tierney (r-devel, April 2026): "The installed C header files for R 4.6.0 should now correspond to the C API as defined by the Writing R Extensions manual: All entry points and variables declared in the headers are now part of the API." (https://stat.ethz.ch/pipermail/r-devel/2026-April/084486.html) / On R_MissingArg: "You are right: R_MissingArg is needed for this so it should be in the variables API. It is now and should no longer generate a check NOTE." (https://stat.ethz.ch/pipermail/r-package-devel/2026q1/012341.html)
+- **Detection**: Grep src/ for three tiers (R 4.6.0):
+  - (i) **Compile failure (hidden/removed):** ENVFLAGS, EXTPTR_PROT, FRAME, ENCLOS, EXTPTR_PTR, EXTPTR_TAG, HASHTAB, IS_S4_OBJECT, LEVELS, NAMED, OBJECT, R_shallow_duplicate_attr, Rf_isValidString, Rf_lazy_duplicate, Rf_NonNullStringMatch, SETLENGTH, SETLEVELS, SET_BODY, SET_CLOENV, SET_ENCLOS, SET_FORMALS, SET_ENVFLAGS, SET_FRAME, SET_GROWABLE_BIT, SET_HASHTAB, SET_NAMED, SET_S4_OBJECT, SET_TRUELENGTH, STDVEC_DATAPTR, TRUELENGTH, UNSET_S4_OBJECT, XTRUELENGTH, VECTOR_PTR, Rf_isFrame, LOGICAL0, INTEGER0, REAL0, COMPLEX0, RAW0, DATAPTR.
+  - (ii) **WARNING:** R_nchar, R_tryWrap, Rf_GetOption, R_lsInternal, BODY, FORMALS, CLOENV, SET_TYPEOF, STRING_PTR, R_duplicate_attr, getConnection, R_data_class, SET_OBJECT, ATTRIB, SET_ATTRIB, Rf_findVarInFrame3, PRCODE, SET_PRCODE, PRENV, SET_PRENV, PRVALUE, SET_PRVALUE, R_PromiseExpr, Rf_allocSExp. (R 4.6.0 NEWS also has an earlier entry saying ATTRIB/SET_ATTRIB "will now receive check 'NOTE's"; the later upgrade entry and the R-4-6-branch `tools/R/sotools.R` `warnNonAPI` list both put them at WARNING.)
+  - (iii) **NOTE:** Rf_acopy_string, any non-API *variable* (e.g. `R_NamespaceRegistry`), plus the remaining R 4.5 list (IS_LONG_VEC, Rf_StringBlank, XLENGTH_EX).
+  - Also flag `#include <R_ext/PrtUtil.h>` (no longer installed), `#include <R_ext/Callbacks.h>` used for `R_ObjectTable` (use `R_ext/ObjectTable.h`), writes through `CHARACTER_DATA`/`CHARACTER_POINTER` (now `const`), and `->UTF8out`/`R_GetConnection(` outside connection implementations.
+- **Fix**: Replace with supported API equivalents. See Writing R Extensions manual. Replacements: `R_getVar`/`R_getVarEx` for `Rf_findVar*`; `R_mapAttrib`/`R_getAttributes`/`R_hasAttrib` for `ATTRIB`; `R_class` for `R_data_class`; `Rf_isDataFrame` for `Rf_isFrame`; `R_altrep_class_name` for `ALTREP_CLASS`; `DATAPTR_RW` only inside ALTREP `Dataptr` methods; `R_getRegisteredNamespace` instead of `R_NamespaceRegistry`; the bindings API (`R_GetBindingType` etc.); `R_ext/ObjectTable.h` instead of `R_ext/Callbacks.h` for `R_ObjectTable`. Test with `PKG_CPPFLAGS += -DNO_LEGACY_NONAPI` on R-devel (Luke Tierney, https://stat.ethz.ch/pipermail/r-devel/2026-April/084481.html).
 - **Files**: `src/*.c`, `src/*.cpp`
+- **Since**: R 4.3+ progressively; major tightening R 4.6.0 (2026-04-24). CRAN hosted transitional versions of some packages with many reverse dependencies.
 
 ### COMP-04: Implicit Function Declarations (C23)
 
@@ -422,14 +468,15 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Files**: `configure`, `cleanup`, `tools/*`
 - **Since**: Pre-2015 for `/bin/bash` detection; R 4.0.0 (2020) added optional `checkbashisms` check; R 4.5+ expanded to autoconf-generated scripts
 
-### COMP-06: C++11/C++14 Specifications Deprecated
+### COMP-06: C++11/C++14 Specifications Defunct
 
-- **Severity**: NOTE (becoming REJECTION in R 4.6.0)
-- **Rule**: `CXX_STD = CXX11` or `CXX_STD = CXX14` in Makevars is deprecated. R 4.6.0 will make these defunct. C++17 is the minimum, C++20 becoming default.
-- **CRAN says**: NOTE about deprecated C++ standard specification.
-- **Detection**: Grep src/Makevars and src/Makevars.win for `CXX_STD\s*=\s*CXX1[14]`.
+- **Severity**: NOTE (R < 4.6) / ignored-and-defunct (R >= 4.6.0). The exact check output under 4.6.0 was not confirmed (UNVERIFIED).
+- **Rule**: `CXX_STD = CXX11` or `CXX_STD = CXX14` in Makevars was deprecated. R 4.6.0 removed support for C++11/C++14: such specifications are ignored and the default C++ standard (C++20 where available) is used; `CXX11`, `CXX14`, `CXX11FLAGS`, `CXX14STD`, `SHLIBCXX11LD` etc. are reported as defunct. C++17 is the minimum.
+- **CRAN says**: NOTE about deprecated C++ standard specification. R 4.6.0 NEWS: "Support for these standards has been removed: the default C++ standard will be used. R CMD config variables CXX11, CXX14 and their associated CXXxxFLAGS, CXXxxPICFLAGS CXXxxSTD, SHLIBCXXxxLD and SHLIBCXXxxLDFLAGS variables are no longer supported and reported as 'defunct'."
+- **Detection**: Grep src/Makevars and src/Makevars.win for `CXX_STD\s*=\s*CXX1[14]`. Also grep `src/Makevars*` and `configure*` for `CXX1[14](FLAGS|PICFLAGS|STD)?\b|SHLIBCXX1[14]LD(FLAGS)?` and `R CMD config CXX1[14]`.
 - **Fix**: Remove the `CXX_STD` line entirely (R defaults to C++17+). If C++17 features are needed explicitly, use `CXX_STD = CXX17`.
 - **Files**: `src/Makevars`, `src/Makevars.win`
+- **Since**: R 4.6.0 (2026-04-24)
 
 ### COMP-07: Strict C Function Prototypes
 
@@ -452,9 +499,9 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### COMP-09: Rust Package Requirements
 
 - **Severity**: REJECTION
-- **Rule**: R packages using Rust (via cargo) must: (1) vendor all crate dependencies (no network access during build), (2) report rustc version before compilation, (3) include AUTHORS file listing all crate authors. Formalized as policy since 2023.
-- **CRAN says**: Rejects packages that download Rust crates during installation or don't vendor dependencies.
-- **Detection**: Check for `src/rust/` or `Cargo.toml`. If present, verify `vendor/` directory exists. Check for `configure` script that prints rustc version. Check for `AUTHORS` file.
+- **Rule**: R packages using Rust (via cargo) must: (1) vendor all crate dependencies (no network access during build), (2) report rustc version before compilation, (3) include AUTHORS file listing all crate authors. Formalized as policy since 2023. Minimum cargo/rustc version requirements must be conservative: test with a cargo at least two (preferably four or more) years old. CRAN's Linux check servers use distribution rustc. Limit `cargo build -j` to 1 or 2.
+- **CRAN says**: Rejects packages that download Rust crates during installation or don't vendor dependencies. "Using Rust in CRAN packages": "test before submission with at least a two-year-old version of cargo, and preferably one four or more years old." / "The Linux servers on the CRAN check farm use system versions, and Linux distributions are often slow to update these so version requirements need to be conservative." / "Archived on 2026-05-15 for repeated policy violation. . On requirement for Rust versions." (string2path) / "Archived on 2026-04-20 as issues were not corrected in time. . Also has recent 'rustc' requirement contrary to the policy." (tynding)
+- **Detection**: Check for `src/rust/` or `Cargo.toml`. If present, verify `vendor/` directory exists. Check for `configure` script that prints rustc version. Check for `AUTHORS` file. Parse `rust-version`/`edition` in Cargo.toml and version checks in configure. Flag an MSRV newer than ~2 years before the submission date, and `edition = 2024`.
 - **Fix**: Run `cargo vendor` and commit the vendor directory. Add configure script that runs `rustc --version`. Create AUTHORS file from `Cargo.toml` contributor fields.
 - **Files**: `src/rust/`, `Cargo.toml`, `configure`, `AUTHORS`
 
@@ -471,9 +518,9 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### COMP-11: Memory Sanitizer (ASAN/UBSAN/Valgrind) Compliance
 
 - **Severity**: NOTE → REJECTION
-- **Rule**: CRAN runs additional checks beyond standard R CMD check using AddressSanitizer (ASAN), Undefined Behavior Sanitizer (UBSAN), and valgrind. Packages with compiled code that trigger memory errors (buffer overflows, use-after-free, uninitialized memory reads, undefined behavior) in these additional checks will be flagged for correction with short deadlines (sometimes 1-2 weeks).
+- **Rule**: CRAN runs additional checks beyond standard R CMD check using AddressSanitizer (ASAN), Undefined Behavior Sanitizer (UBSAN), and valgrind. Packages with compiled code that trigger memory errors (buffer overflows, use-after-free, uninitialized memory reads, undefined behavior) in these additional checks will be flagged for correction with short deadlines (sometimes 1-2 weeks). Additional-issue results (ASAN/UBSAN, gcc-san/clang-san, valgrind, linux-arm64) are now reported in incoming pretest emails and can block acceptance. Overlapping Fortran array arguments (e.g. BLAS-style DCOPY on overlapping slices of the same array) trigger "AddressSanitizer: memcpy-param-overlap" under flang/clang and violate Fortran aliasing rules (limSolve, scheduled for removal Jun 2026).
 - **CRAN says**: "==ERROR: AddressSanitizer: stack-buffer-overflow" / "runtime error: undefined behavior" / "Conditional jump or move depends on uninitialised value(s)"
-- **Detection**: Cannot detect statically. Packages with C/C++/Fortran code should be tested locally with sanitizers before submission. Use Docker images with R compiled with ASAN/UBSAN (e.g., `rocker/r-devel-san`), or use rhub's sanitizer-enabled platforms.
+- **Detection**: Cannot detect statically. Packages with C/C++/Fortran code should be tested locally with sanitizers before submission. Use Docker images with R compiled with ASAN/UBSAN (e.g., `rocker/r-devel-san`), or use rhub's sanitizer-enabled platforms. Flag Fortran calls passing two slices of the same array to a copy routine (`CALL xDCOPY(N, X(J+1), 1, X(J), 1)` pattern).
 - **Fix**: Fix memory errors identified by sanitizer output. Common fixes: bounds checking on array access, initializing all variables, fixing use-after-free by managing object lifetimes, removing undefined behavior (signed integer overflow, null pointer dereference).
 - **Files**: `src/*.c`, `src/*.cpp`, `src/*.f`, `src/*.f90`
 - **Since**: ~2016-2017 — ASAN/UBSAN checks expanded on CRAN's Fedora and Debian check flavors; packages can pass standard R CMD check on all platforms but still fail these additional checks
@@ -481,12 +528,42 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### COMP-12: UCRT Windows Toolchain Compatibility
 
 - **Severity**: REJECTION (on Windows)
-- **Rule**: Since R 4.2.0, Windows uses UCRT (Universal C Runtime) exclusively via Rtools42+, dropping 32-bit support and MSVCRT. Packages must not download pre-compiled MSVCRT libraries at install time. External DLLs must be compatible with UCRT. Encoding behavior changed to UTF-8 on Windows.
+- **Rule**: Since R 4.2.0, Windows uses UCRT (Universal C Runtime) exclusively via Rtools42+, dropping 32-bit support and MSVCRT. Packages must not download pre-compiled MSVCRT libraries at install time. External DLLs must be compatible with UCRT. Encoding behavior changed to UTF-8 on Windows. Rtools45 serves R 4.5.x, 4.6.x and R-devel (no Rtools46); since Rtools45 rev 6691 the compiler is GCC 14.3 and curl requires `secur32` for packages not using pkg-config.
 - **CRAN says**: Compilation or linking failures on `r-devel-windows-x86_64` or `r-release-windows-x86_64` platforms.
 - **Detection**: Check if package downloads pre-compiled Windows binaries at install time (grep configure.win and src/Makevars.win for `download.file`, `curl`, or `wget` calls). Check for `Makevars.ucrt` file if platform-specific build configuration is needed.
 - **Fix**: Use libraries bundled with Rtools42+ instead of downloading external pre-compiled binaries. Add `Makevars.ucrt` if different build flags are needed for UCRT. Test on win-builder with R-devel before submitting.
 - **Files**: `src/Makevars.win`, `src/Makevars.ucrt`, `configure.win`
 - **Since**: R 4.2.0 (2022) — UCRT became the only Windows target; ~380 packages initially affected; CRAN switched incoming Windows checks to UCRT in December 2021
+
+### COMP-13: Obsolete Rcpp Linker/Compiler Flags in Makevars
+
+- **Severity**: WARNING → REJECTION
+- **Rule**: `Rcpp:::LdFlags()` / `RcppLdFlags()` (and `RcppLdPath()`) have been unnecessary since 2013. Under `--as-cran` from R 4.6.0 (and in CRAN incoming checks since about 2026-02-19), the message they print during installation is a "significant warning". `LinkingTo: Rcpp` is all that is needed.
+- **CRAN says**: "Found the following significant warnings: 'Rcpp:::LdFlags' has not been needed since 2013 (!!) and may get removed in 2027. Please update your 'Makevars'." (Check regex: `LdFlags.* has not been needed since 2013`.) CRAN incoming check script comment: "Added on 2026-02-19 and on for '--as-cran', but perhaps a bit much for the regular checks, so for now only here ...?"
+- **Detection**: Grep `src/Makevars*` for `Rcpp:::LdFlags|RcppLdFlags|RcppLdPath|Rcpp:::CxxFlags`. `CxxFlags` is not matched by R's regex, so report it as a NOTE-level recommendation.
+- **Fix**: Delete the `PKG_LIBS += $(shell ... Rcpp:::LdFlags())` and `PKG_CXXFLAGS = ... Rcpp:::CxxFlags()` lines. Keep `LinkingTo: Rcpp` in DESCRIPTION.
+- **Files**: `src/Makevars`, `src/Makevars.win`, `src/Makevars.ucrt`, `src/Makevars.in`
+- **Since**: R 4.6.0 (2026-04-24) via `_R_CHECK_RCPP_NOT_NEEDED_` in the `--as-cran` defaults (not in NEWS); CRAN incoming since about 2026-02-19
+
+### COMP-14: Missing Standard C++ Headers (libc++ Transitive Includes, LLVM 23)
+
+- **Severity**: ERROR on r-devel clang flavors, leading to a CRAN problem notification with a 21-day deadline
+- **Rule**: C++ code must `#include` every standard header it uses. LLVM 23's libc++ dropped many transitive includes, so code that relied on `<vector>` pulling in `<algorithm>` and similar no longer compiles.
+- **CRAN says**: "if declaration(s) (especially in std:) are reported as missing, do ensure that the header(s) which declare them are included. Most commonly <algorithm> or <iterator> is missing." / "People writing C and calling it C++ need to include headers such as <cstdlib>, <cstddef>, <cmath> or <ctime>." (Brian Ripley, https://www.stats.ox.ac.uk/pub/bdr/clang23/README.txt)
+- **Detection**: For each `src/*.cpp|*.cc|*.h|*.hpp` translation unit, map used identifiers to their headers and flag any header not directly included. Examples: `std::sort|std::find|std::max_element` need `<algorithm>`; `std::back_inserter|std::distance|std::advance` need `<iterator>`; `std::is_same|std::enable_if` need `<type_traits>`; `size_t|nullptr_t` need `<cstddef>`; `fabs|isnan|sqrt|log` need `<cmath>`; `clock|time|localtime` need `<ctime>`; `malloc|exit|abs` need `<cstdlib>`. This is heuristic, so report as WARNING.
+- **Fix**: Add the missing `#include`. Do not depend on `_LIBCPP_KEEP_TRANSITIVE_INCLUDES_LLVM23`, which will be removed in LLVM 24 (the fedora-clang checks define it; the debian-clang checks do not).
+- **Files**: `src/*.cpp`, `src/*.cc`, `src/*.h`, `src/*.hpp`, `inst/include/**`
+- **Since**: August/September 2026. LLVM 23.1.0 was released 2026-08-25 and adopted on the r-devel-linux debian-clang and fedora-clang flavors; CRAN `clang23` notifications began around 2026-09-04.
+
+### COMP-15: Do Not Suppress Compiler Diagnostics
+
+- **Severity**: WARNING → REJECTION
+- **Rule**: "Significant" compiler warnings at install time (e.g. -Wuninitialized, -Warray-bounds from included headers such as Eigen/CGAL on Windows gcc) fail the pretest. Disabling them with `-Wno-*` flags or pragmas violates policy and is itself flagged as non-portable.
+- **CRAN says**: Policy: "Packages should not attempt to disable compiler diagnostics, nor to remove other diagnostic information such as symbols in shared objects." / Maintainer report (SurfaceMesh, Sep 2026) after adding `-Wno-array-bounds -Wno-uninitialized`: "the check still generates a non-portability warning which means the package will not pass the CRAN pre-test" (https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012550.html)
+- **Detection**: Grep src/Makevars* for `-Wno-`, `-w\b`, `-fpermissive`. Grep src/ for `#pragma (GCC|clang) diagnostic ignored`.
+- **Fix**: Fix the code, or update or patch the upstream header package (e.g. newer RcppEigen/RcppCGAL). If the warning comes from a dependency compiled during check, note it in submission comments. Local-only quieting is acceptable if conditioned on a developer-only signal (e.g. presence of `.git/`).
+- **Files**: `src/Makevars`, `src/Makevars.win`, `src/*`
+- **Since**: Long-standing policy; recurring in 2026 (LABTNSCPSS Feb 2026, SurfaceMesh Sep 2026)
 
 ---
 
@@ -497,7 +574,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Severity**: REJECTION
 - **Rule**: All exported functions must document their return value with `@return` (roxygen2) or `\value{}` (.Rd). Even void functions need this.
 - **CRAN says**: "Please add \\value to .Rd files regarding exported methods and explain the functions results in the documentation."
-- **Detection**: Parse R files for `@export` without corresponding `@return`. Parse .Rd files for missing `\value{}` sections. Data set docs (`\docType{data}`) are exempt.
+- **Detection**: Parse R files for `@export` without corresponding `@return`. Parse .Rd files for missing `\value{}` sections. Data set docs (`\docType{data}`) are exempt. Aim for parity with R-devel's experimental `_R_CHECK_RD_CONTENTS_VALUE_=true` (r89420, Feb 2026), which lists Rd files without \value (https://stat.ethz.ch/pipermail/r-devel/2026-February/084371.html).
 - **Fix**: Add `@return` describing the class and meaning of the return value. For side-effect functions: `@return No return value, called for side effects`.
 - **Files**: `R/*.R`, `man/*.Rd`
 - **Since**: Pre-2015 — one of the most common rejection reasons for first-time submissions across all studied periods
@@ -515,7 +592,8 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### DOC-03: Examples Must Be Fast (< 5 seconds each)
 
 - **Severity**: NOTE → REJECTION
-- **Rule**: Individual examples should complete in under 5 seconds. Total check time (examples + vignettes + tests) under 10 minutes.
+- **Rule**: Individual examples should complete in under 5 seconds. Total check time (examples + vignettes + tests) under 10 minutes. Elapsed (wall-clock) time counts, so network waits trip the NOTE (see NET-01). No special allowance is made for algorithmically slow "workflow" examples.
+- **CRAN says**: "* checking examples ... [3s/47s] NOTE / Examples with CPU (user + system) or elapsed time > 5s" (https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012386.html) / Ivan Krylov (not CRAN team): "I don't think there's any special consideration for packages whose examples take too long for algorithmic reasons" (https://stat.ethz.ch/pipermail/r-package-devel/2026q1/012309.html)
 - **Detection**: Cannot fully detect statically — flag examples that involve file I/O, network requests, large computations, or loops with high iteration counts. Flag if `\donttest{}` is not used.
 - **Fix**: Reduce iterations, use toy datasets, precompute results, wrap slow code in `\donttest{}`.
 - **Files**: `R/*.R`, `man/*.Rd`
@@ -596,6 +674,46 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Files**: `vignettes/*.Rmd`, `vignettes/*.Rnw`
 - **Since**: R 3.6.0 (2019) — R CMD check began checking for duplicated vignette titles
 
+### DOC-12: Relative Links in Rd and Vignettes Must Resolve
+
+- **Severity**: NOTE
+- **Rule**: Relative URLs in Rd files and vignettes (for example `../doc/foo.html`, `../../otherpkg/html/topic.html`, `../help/topic`) must resolve against the installed package's help system. Broken ones are reported in a new check step.
+- **CRAN says**: "checking relative paths in package URLs ... NOTE  Found the following (possibly) invalid URLs:  URL: <url>  From: <file>"
+- **Detection**: Extract `\href{}`/`\url{}` targets in `man/*.Rd` and `href=`/markdown links in `vignettes/*` that have no scheme. Flag paths that point to files the package does not install (no matching `inst/doc` file, vignette output or help topic).
+- **Fix**: Use `\link[pkg]{topic}` for help cross-references, `vignette("name", package = "pkg")` text, or absolute `https://CRAN.R-project.org/package=pkg/...` URLs.
+- **Files**: `man/*.Rd`, `vignettes/*.Rmd`, `vignettes/*.Rnw`, `R/*.R` (roxygen)
+- **Since**: R 4.6.0 (2026-04-24), `--as-cran` (`R_check_urls_relative_paths`; not in NEWS); CRAN regular checks set `_R_CHECK_URLS_RELATIVE_PATHS_=true`
+
+### DOC-13: Rd Bibliography Citations Must Be Shown and Built with R >= 4.6.0
+
+- **Severity**: NOTE
+- **Rule**: When using the R 4.6.0 Rd bibliography macros, every entry cited with `\bibcitet{}`/`\bibcitep{}` must appear in a `\bibshow{}` (usually in `\references{}`). The tarball must be built with R >= 4.6.0 so that `build/partial.rdb` contains the expanded macros.
+- **CRAN says**: "Bibentries cited but not shown in Rd file 'x.Rd':" and "Found bibentries with unexpected macro expansions.  Rebuild with R >= 4.6.0?"
+- **Detection**: For each `man/*.Rd`, collect the `\bibcite[tp]{...}` keys and the `\bibshow{...}` keys (`*` means all keys cited so far). Flag cited keys not covered. If any `\bib*` macro is used, check that `build/partial.rdb` exists in the tarball, that `inst/REFERENCES.R` or `inst/REFERENCES.bib` exists for local keys, and that `bibtex` is in Suggests when `.bib` is used.
+- **Fix**: Add `\references{ \bibshow{*} }`. Rebuild with R >= 4.6.0. Add `Depends: R (>= 4.6.0)` (see DOC-14).
+- **Files**: `man/*.Rd`, `inst/REFERENCES.R`, `inst/REFERENCES.bib`, `DESCRIPTION`
+- **Since**: R 4.6.0 (2026-04-24), `--as-cran` (`R_check_Rd_bibentries_cited_not_shown`; not in NEWS); CRAN regular checks set `_R_CHECK_RD_BIBENTRIES_CITED_NOT_SHOWN_=true`
+
+### DOC-14: New R 4.6.0 Rd Syntax Requires `Depends: R (>= 4.6.0)`
+
+- **Severity**: WARNING (check behaviour on older R is UNVERIFIED; NEWS states it as a requirement)
+- **Rule**: Rd files that use `\linkS4class[pkg]{Class}`, `\linkS4methods{}`, `\manual{}{}` or `\bibcitet`/`\bibcitep`/`\bibshow`/`\bibinfo` need a formal `R (>= 4.6.0)` dependency.
+- **CRAN says**: "Packages with the new syntax need to formally depend on 'R >= 4.6.0'." (R 4.6.0 NEWS, about `\linkS4class[<pkg>]{}`)
+- **Detection**: Grep `man/*.Rd` for `\\linkS4class\[|\\linkS4methods\{|\\manual\{|\\bibcite[tp]\{|\\bibshow\{|\\bibinfo\{`. If any match, parse `Depends:` for `R (>= x.y.z)` and flag when it is missing or lower than 4.6.0.
+- **Fix**: Add or raise `Depends: R (>= 4.6.0)`, or use the old form `\link[pkg:Class-class]{Class}`.
+- **Files**: `man/*.Rd`, `DESCRIPTION`
+- **Since**: R 4.6.0 (2026-04-24)
+
+### DOC-15: \arguments Requires a Matching \usage
+
+- **Severity**: NOTE (blocks pretest)
+- **Rule**: An Rd file that documents `\arguments` must have a `\usage` section. Entries in `\usage` that parse as R calls must correspond to real functions with matching arguments. Overview pages and non-R (e.g. JavaScript) docs should use `\describe{}` instead of `\arguments{}`.
+- **CRAN says**: "Rd files without \usage: [...] \arguments should not be documented without \usage." (pretest NOTE, "Check: Rd contents") and Uwe Ligges, 2026-09-28: "And you should really add the usage line, a usage line does not mean these are executed." (https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012558.html). Ivan Krylov: "Entries in \usage{} that parse as valid R function calls must correspond to real R functions with matching arguments." (https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012566.html)
+- **Detection**: For each man/*.Rd, flag `\arguments{` present and `\usage{` absent. In roxygen, flag blocks documenting `NULL` or `"_PACKAGE"`-style topics that have `@param` but no `@usage`.
+- **Fix**: Add `#' @usage fn(x, ...)`, or remove `@param` tags and describe arguments in `@details`/`\describe{}`.
+- **Files**: `man/*.Rd`, `R/*.R`
+- **Since**: Long-standing tools::checkRdContents behaviour; R 4.6.0 extended related checkDocFiles notes; seen twice Jul-Sep 2026 (causalDisco, shinylight)
+
 ---
 
 ## Category: Licensing
@@ -641,7 +759,8 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### SIZE-02: Check Time Must Be < 10 Minutes
 
 - **Severity**: REJECTION
-- **Rule**: Total time for examples + vignettes + tests must be under 10 minutes on CRAN infrastructure (which is slower than typical dev machines).
+- **Rule**: Total time for examples + vignettes + tests must be under 10 minutes on CRAN infrastructure (which is slower than typical dev machines). The binding measurement is the r-devel-windows-x86_64 incoming pretest, which is slower than Linux. The NOTE causes automatic pretest rejection and is listed at the bottom of the pretest email, where it is easy to miss. CRAN can manually overrule it for large packages ("That's why CRAN overruled the 10 min threshold and let your package pass.", Uwe Ligges, 2026-07-14). Installation time alone (~1 minute) is "perfectly fine". If CRAN has not replied after 2 weeks, send a reminder. CRAN's incoming hard-kill timeouts were raised to 180m in 2026; these are separate from this 10-minute guidance.
+- **CRAN says**: "Flavor: r-devel-windows-x86_64 / Check: Overall checktime, Result: NOTE / Overall checktime 25 min > 10 min" (https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012533.html) / Uwe Ligges: "1 minute is perfectly fine. The oeverall check time should not exceed 10 minutes." [sic] (https://stat.ethz.ch/pipermail/r-package-devel/2026q1/012338.html) / "Note we receive roughly 300 messages per day (including submission mails and the mails we send out). Once 2 weeks passed, please send us a reminder in case we have not responded." (https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012456.html)
 - **Detection**: Run `R CMD check --as-cran` and check timing output. Flag if > 5 minutes (safety margin).
 - **Fix**: Reduce test/example/vignette runtime. Use `\donttest{}` for slow examples. Skip slow tests conditionally. Use precomputed vignettes.
 - **Files**: `tests/**/*.R`, `R/*.R`, `vignettes/*.Rmd`
@@ -668,6 +787,26 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Fix**: Remove binaries. Include source code. Build from source during installation.
 - **Files**: Entire package
 
+### PLAT-03: Hard-Coded macOS Big Sur arm64 Paths/Targets
+
+- **Severity**: WARNING (install failure on CRAN macOS arm64 builders)
+- **Rule**: From R 4.6.0, CRAN macOS arm64 binaries target macOS 14 (package type `mac.binary.sonoma-arm64`), and external libraries live under `https://mac.r-project.org/bin/darwin23/arm64/`. `configure` scripts must not hard-code `darwin20/arm64`, `big-sur-arm64` or `-mmacosx-version-min=11` for arm64. Intel (`big-sur-x86_64`) stays on the macOS 11 target.
+- **CRAN says**: "R 4.6.0 CRAN arm64 builds use Xcode 26.0.1, macOS 14 target and 14.4 SDK with package type mac.binary.sonoma-arm64." / "We are no longer building binaries for macOS versions before 11 ... and before macOS 14 on Apple Silicon." (https://mac.r-project.org/). The external_libs policy now points to `darwin23/arm64` (SVN r6797).
+- **Detection**: Grep `configure*`, `src/Makevars*` and `tools/*` for `darwin20/arm64`, `big-sur-arm64`, `mac.binary.big-sur-arm64`, and arm64-specific `macosx-version-min=1[0-3]`.
+- **Fix**: Derive paths from `R CMD config` / `.Platform$pkgType`, or use `pkg-config`. Do not hard-code OS-versioned directories.
+- **Files**: `configure`, `configure.ac`, `src/Makevars.in`, `tools/*.R`
+- **Since**: R 4.6.0 (2026-04-24); external_libs policy r6797 (2026-02-20)
+
+### PLAT-04: No Dependence on Extended Precision or OS-String Sniffing
+
+- **Severity**: WARNING → REJECTION (via linux-arm64 / macOS arm64 additional checks)
+- **Rule**: Tests must not assert results that depend on long-double precision, or on chaotic or non-converged algorithm output. arm64 has no extended precision. OS detection must not assume "not darwin" means Solaris or Linux-x86.
+- **CRAN says**: "Additional issues checked: linux-arm64: Status: 4 WARNINGs, 5 NOTEs" (akin pretest email, https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012402.html) / Simon Urbanek: "TL;DR this is not macOS specific - your test example is chaotic and thus will be influenced even by small changes in the precision beyond what is guaranteed, i.e. your assumptions are not generally valid and thus the tests don't work." / "The arm CPUs used by Macs only support double precision, so any operations that are otherwise preformed with extended precision will be different." (https://stat.ethz.ch/pipermail/r-package-devel/2026q1/012306.html)
+- **Detection**: Flag `expect_equal`/`identical` on floating-point results with `tolerance = 0` or tiny tolerances. Flag `R.version$os` / `Sys.info()["sysname"]` regex branches that fall through to `system("/bin/kstat ...")` or other platform-specific commands without an else-error (the akin failure came from a dependency doing `grepl("darwin|solaris", R.version$os)`).
+- **Fix**: Use tolerances. Test deterministic components on saved fixtures. Test with `R --disable-long-double` builds or arm64 CI (`ubuntu-24.04-arm` runners, QEMU `--platform linux/arm64`). Use `.Platform`/`Sys.info()` with explicit cases.
+- **Files**: `tests/**`, `R/*.R`
+- **Since**: 2026, as linux-arm64 additional checks appear in incoming pretests
+
 ---
 
 ## Category: Dependencies
@@ -675,10 +814,12 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### DEP-01: Strong Dependencies Must Be on CRAN or Bioconductor
 
 - **Severity**: REJECTION
-- **Rule**: Packages in Depends, Imports, LinkingTo must be available on CRAN or Bioconductor. Suggests/Enhances from other repos need `Additional_repositories` field.
-- **Detection**: Parse DESCRIPTION dependencies. Check each against CRAN/Bioconductor availability.
-- **Fix**: Move non-CRAN dependencies to Suggests with conditional usage, or add `Additional_repositories`.
+- **Rule**: Packages in Depends, Imports, LinkingTo must be available from CRAN or the Bioconductor *software* repository. Bioconductor annotation and experiment-data packages may only appear in Suggests/Enhances (no `Additional_repositories` needed for them). Other non-CRAN Suggests/Enhances need `Additional_repositories` or access instructions in Description.
+- **CRAN says**: "Packages on which a CRAN package depends should be available from a standard repository. The strong dependencies (i.e., packages listed in the 'Depends', 'Imports' or 'LinkingTo' fields) should be available from CRAN or the Bioconductor software repository. If any mentioned in 'Suggests' or 'Enhances' fields are not from one of these or the Bioconductor annotation and experiment data repositories, where to obtain them at a repository should be specified in an 'Additional_repositories' field of the DESCRIPTION file (as a comma-separated list of repository URLs) or for other means of access, described in the 'Description' field." (CRAN Repository Policy)
+- **Detection**: Parse DESCRIPTION dependencies. Check each against CRAN/Bioconductor availability. Flag strong deps that are BioC annotation/experiment packages (BiocManager repositories `BioCann`, `BioCexp`; e.g. `org.Hs.eg.db`, `BSgenome.*`, `TxDb.*`, `*Data` experiment packages). These are Suggests-only.
+- **Fix**: Move non-CRAN dependencies to Suggests with conditional usage, or add `Additional_repositories`. Move BioC data/annotation packages to Suggests and use them conditionally.
 - **Files**: `DESCRIPTION`
+- **Since**: Pre-2015 (general); BioC-software-only restriction since CRAN policy SVN r6734 (committed 2025-12-15; r6738 on 2025-12-19 only wrapped "Bioconductor" in `@I{}`), published on the live policy page by 2026-02-20
 
 ### DEP-02: Suggested Packages Must Be Used Conditionally
 
@@ -706,10 +847,11 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 
 - **Severity**: REJECTION
 - **Rule**: Package must not error or produce check warnings if internet resources are unavailable, changed, or rate-limited.
+- **CRAN says**: "Archived on <date> for policy violation. . On Internet access." / "Archived on <date> for repeated policy violation. . On Internet access." (CRAN `X-CRAN-Comment`) / Uwe Ligges, 2026-05-18: "Given the timings I guess these are internet access issues with US government web sites that we frequently observe. Simply define a timeout for internet access and exit gracefully if you hit it." (https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012391.html)
 - **Detection**: Find URL requests (httr, curl, download.file). Check if wrapped in tryCatch or similar error handling.
-- **Fix**: Wrap all network calls in `tryCatch()`. Return informative error messages. Use `\donttest{}` for examples requiring network. **Important (R 4.5+ enforcement):** Graceful failure must extend to ALL downstream code in examples and vignettes, not just the network-calling function itself. If `read_data()` returns NULL on failure, any vignette code that uses the result must also handle the NULL case gracefully.
+- **Fix**: Wrap all network calls in `tryCatch()`. Return informative error messages. Use `\donttest{}` for examples requiring network. **Important (R 4.5+ enforcement):** Graceful failure must extend to ALL downstream code in examples and vignettes, not just the network-calling function itself. If `read_data()` returns NULL on failure, any vignette code that uses the result must also handle the NULL case gracefully. Set explicit timeouts (e.g. `httr2::req_timeout()`, `options(timeout = )` scoped with on.exit) and treat timeouts as failures to handle gracefully. Slow remote servers otherwise surface as example-timing NOTEs on CRAN's European check machines (DOC-03). Failures inside dependencies you call (e.g. GDAL/stars remote reads) are your responsibility: "In the end it is your responsibility since you are providing the API, the user shouldn't' need to know anything about the intricacies of what happens under the hood in other packages." (Simon Urbanek, 2026-02-18, https://stat.ethz.ch/pipermail/r-package-devel/2026q1/012285.html). Do not assume fixed TCP ports are free; catch server-start errors ("In general, no fixed port number can be assumed to be available on the machine running R CMD check.", Ivan Krylov, https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012559.html).
 - **Files**: `R/*.R`
-- **Since**: Pre-2015 — CRAN policy has long required graceful failure; enforcement intensified 2020-2022 with tighter deadlines and faster archival
+- **Since**: Pre-2015 — CRAN policy has long required graceful failure; enforcement intensified 2020-2022 with tighter deadlines and faster archival. 2026: Internet access was the reason for 25 of 29 policy-violation archivals Feb-Sep 2026; repeat offenders are archived for "repeated policy violation".
 
 ### NET-02: Must Use HTTPS
 
@@ -752,7 +894,7 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Severity**: REQUIRED (for updates)
 - **Rule**: Must verify that packages depending on yours still pass R CMD check after your changes.
 - **Detection**: Check if package is already on CRAN. If so, remind about revdep checks.
-- **Fix**: Run `revdepcheck::revdep_check()`. Document results in cran-comments.md.
+- **Fix**: Run `revdepcheck::revdep_check()`. Document results in cran-comments.md. Add new function arguments at the end with defaults. Inserting a positional argument breaks reverse dependencies that call positionally, and CRAN emails about strong reverse-dependency conflicts ("If you're adding a new parameter to a function, the safest way to do so is to add it after all the other parameters, and set a default value so the old usage will still produced the same results.", Duncan Murdoch, https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012394.html). Base-R tooling: `tools::package_dependencies(reverse = TRUE, which = 'most')`, `utils::download.packages()`, `tools::check_packages_in_dir()`.
 
 ### SUB-04: Create cran-comments.md
 
@@ -772,13 +914,14 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 
 - **Severity**: POLICY
 - **Rule**: Established packages should not submit updates more than once every 1-2 months.
+- **CRAN says**: "CRAN incoming feasibility, Result: NOTE ... Number of updates in past 6 months: 7" (akin, May 2026 pretest)
 - **Detection**: Check last CRAN publication date (if already on CRAN).
 - **Fix**: Plan releases carefully. Batch fixes together.
 
 ### SUB-07: CRAN Vacation Periods
 
 - **Severity**: INFORMATIONAL
-- **Rule**: CRAN has a winter break (~Dec 23 - Jan 7) during which no submissions are processed. Automated submission tools (devtools) during this period can trigger IP blocks.
+- **Rule**: CRAN has a winter break (~Dec 23 - Jan 7) during which no submissions are processed. Automated submission tools (devtools) during this period can trigger IP blocks. Summer closure too: 2026-08-05 to 2026-08-19. Deadline-extension requests during closures go to CRAN@R-project.org (Uwe Ligges, 2026-08-23, https://stat.ethz.ch/pipermail/r-package-devel/2026q3/012519.html), not the list.
 - **Detection**: Informational — flag if submitting in December/January.
 - **Fix**: Plan submissions to avoid the vacation period. If IP is blocked, email CRAN with your IP address.
 
@@ -816,8 +959,9 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 
 - **Severity**: NOTE
 - **Rule**: All URLs in package files must resolve (no 404s, redirects should be updated to final URL).
-- **Detection**: Run `urlchecker::url_check()`.
-- **Fix**: Update or remove broken URLs. CRAN does not tolerate permanent redirections (301s) — update to the final URL directly.
+- **CRAN says**: "Found the following (possibly) invalid URLs: URL: From: README.md Message: Empty URL" (saferDev pretest, May 2026, https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012388.html)
+- **Detection**: Run `urlchecker::url_check()`. Flag `href=""`/`[]()` empty links in README.md, NEWS.md and vignettes (R 4.6.0 installs README.md into HTML help). Reproduce with `tools:::.pandoc_md_for_CRAN()`.
+- **Fix**: Update or remove broken URLs. CRAN does not tolerate permanent redirections (301s) — update to the final URL directly. For sites behind bot protection (Cloudflare 403) or geo-blocking, avoid `\url{}` and use `\verb{}` or `\samp{}` (not `\code{}`: "\code{} is formally reserved for R code fragments [...] To disable the hyperlink, you could use \verb{} instead, or \samp{} if you want it single quotes.", Sebastian Meyer, 2026-03-03, https://stat.ethz.ch/pipermail/r-package-devel/2026q1/012305.html), or explain in submission comments ("please simply say so in your submission comments", Uwe Ligges, 2026-04-16, https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012368.html).
 - **Files**: All text files
 - **Since**: R 3.2.0 (2015) — URL accessibility checking introduced; enhanced with `tools::check_package_urls()` in R 4.2.0 (2022)
 
@@ -860,11 +1004,11 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 
 - **Severity**: NOTE → REJECTION
 - **Rule**: CRAN does not tolerate permanent URL redirections (HTTP 301). URLs in DESCRIPTION, CITATION, README, vignettes, and Rd files must point to their final destination directly. HTTP-to-HTTPS redirects, www/non-www redirects, and domain migration redirects all trigger NOTEs. DOI redirects are exempt (DOIs always redirect).
-- **CRAN says**: "Found the following (possibly) invalid URLs: URL: http://example.com From: DESCRIPTION Status: 301 Message: Moved Permanently"
+- **CRAN says**: "Found the following (possibly) invalid URLs: URL: http://example.com From: DESCRIPTION Status: 301 Message: Moved Permanently". From R 4.6.0, `--as-cran` sets `_R_CHECK_URLS_SHOW_301_STATUS_`, so moved URLs are reported as `URL: <old> (moved to <new>)` with `Status: 301` / `Message: Moved Permanently`.
 - **Detection**: Check all URLs in package files. For each URL, verify it does not return a 301 redirect status. Specifically flag: `http://` URLs where the HTTPS version exists, URLs to domains known to have migrated, URLs with `www.` when the non-www version is canonical (or vice versa). DOI URLs (`https://doi.org/...`) are exempt.
 - **Fix**: Update all URLs to their final destination. Replace `http://` with `https://` where the site supports it. Use the `urlchecker` package to validate all URLs before submission: `urlchecker::url_check()`.
 - **Files**: `DESCRIPTION`, `man/*.Rd`, `vignettes/*.Rmd`, `README.md`, `inst/CITATION`
-- **Since**: R 3.2.0 (2015) — URL accessibility checking introduced; redirect intolerance tightened progressively through R 4.0+ (2020) with enhanced parallel URL checking
+- **Since**: R 3.2.0 (2015) — URL accessibility checking introduced; redirect intolerance tightened progressively through R 4.0+ (2020) with enhanced parallel URL checking; explicit 301 status display under --as-cran from R 4.6.0
 
 ---
 
@@ -1091,11 +1235,21 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 
 - **Severity**: NOTE → REJECTION
 - **Rule**: Package code in `R/*.R` must not use `library()` or `require()` to load other packages. These modify the search path and create fragile implicit dependencies. Instead, use namespace imports (`importFrom()` in NAMESPACE) or the `pkg::func()` calling convention.
-- **CRAN says**: R CMD check NOTE: "library() or require() call not declared from: 'pkgname'" / "library() or require() calls in package code"
-- **Detection**: Grep `R/*.R` files for `library(` and `require(` calls that are not inside `if (interactive())` blocks or conditional checks. Distinguish from `requireNamespace()` which is correct.
+- **CRAN says**: R CMD check NOTE: "library() or require() call not declared from: 'pkgname'" / "library() or require() calls in package code" / "'library' or 'require' calls in package code: [...] Please use :: or requireNamespace() instead." (`tools:::.check_packages_used(dir=)` output, Kurt Hornik, https://stat.ethz.ch/pipermail/r-devel/2026-June/084612.html)
+- **Detection**: Grep `R/*.R` files for `library(` and `require(` calls that are not inside `if (interactive())` blocks or conditional checks. Distinguish from `requireNamespace()` which is correct. Scan *top-level* (non-assignment) calls in R/*.R, e.g. `library()`, `require()`, `install.packages()`, `options()`, or `lapply(pkgs, library, ...)`. R CMD check analyses the installed namespace, so these run at install time and evade its checks (Kurt Hornik, r-devel 2026-06). Hornik is working on source-level detection.
 - **Fix**: Replace `library(pkg)` with proper NAMESPACE imports: add `importFrom(pkg, func)` to NAMESPACE (or `@importFrom pkg func` in roxygen2). Or use `pkg::func()` syntax. Use `requireNamespace("pkg", quietly = TRUE)` for conditional availability checks.
 - **Files**: `R/*.R`, `NAMESPACE`
 - **Since**: R 3.2.0 (2015) — R CMD check began noting `library()`/`require()` in package code; combined with R 3.3.0 (2016) codetools enforcement of explicit imports
+
+### NS-09: No ::: Calls to the Package's Own Namespace
+
+- **Severity**: NOTE (treated as blocking for new submissions)
+- **Rule**: Package code should not use `pkg:::fn` to call its own internal objects. (CODE-12 covers `:::` into base and recommended packages.)
+- **CRAN says**: "Check: dependencies in R code, Result: NOTE / There are ::: calls to the package's namespace in its code. A package almost never needs to use ::: for its own objects:" (saferDev pretest, May 2026, https://stat.ethz.ch/pipermail/r-package-devel/2026q2/012388.html)
+- **Detection**: Read Package from DESCRIPTION. Grep R/*.R for `<Package>:::`.
+- **Fix**: Call internal functions directly by name. Within-package code sees all namespace objects.
+- **Files**: `R/*.R`
+- **Since**: Long-standing R CMD check NOTE; observed blocking saferDev 1.0.0 (May 2026)
 
 ---
 
@@ -1221,11 +1375,12 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### SYS-03: C++20 Default Standard Transition
 
 - **Severity**: NOTE
-- **Rule**: R 4.6.0 makes C++20 the default C++ standard where available. Packages that explicitly set `CXX_STD = CXX17` in Makevars should verify compatibility with C++20 compilation. Packages still specifying `CXX_STD = CXX11` or `CXX_STD = CXX14` get a WARNING (already covered by COMP-06). Packages needing exactly C++17 should keep the explicit declaration; packages compatible with C++20 can remove `CXX_STD` entirely.
-- **CRAN says**: R 4.6.0 NEWS: "C++20 is now the default C++ standard where available."
-- **Detection**: Check if package has `src/` with C++ files. Check if `CXX_STD` is set in Makevars. If `CXX_STD = CXX17` is explicitly set, flag as informational for C++20 compatibility review.
+- **Rule**: R 4.6.0 makes C++20 the default C++ standard where available. Packages that explicitly set `CXX_STD = CXX17` in Makevars should verify compatibility with C++20 compilation. Packages still specifying `CXX_STD = CXX11` or `CXX_STD = CXX14` are covered by COMP-06 (defunct in R 4.6.0). Packages needing exactly C++17 should keep the explicit declaration; packages compatible with C++20 can remove `CXX_STD` entirely.
+- **CRAN says**: R 4.6.0 NEWS: "The default C++ standard has been changed to C++20 where available (which it is on all known platforms from 2021 on): if not C++17 is used if available otherwise C++ is not supported (as before). (GCC 16 has also switched to C++20 as its default.) Packages can request C++17 if essential."
+- **Detection**: Check if package has `src/` with C++ files. Check if `CXX_STD` is set in Makevars. If `CXX_STD = CXX17` is explicitly set, flag as informational for C++20 compatibility review. GCC 16.2 and clang 23 (also C++20-default toolchains) are now on the CRAN r-devel Linux flavors.
 - **Fix**: For new packages: remove CXX_STD entirely (C++20 default is backward-compatible for most code). For packages needing exactly C++17: keep `CXX_STD = CXX17`. For packages needing C++20 features: set `CXX_STD = CXX20`.
 - **Files**: `src/Makevars`, `src/Makevars.win`
+- **Since**: R 4.6.0 (2026-04-24)
 
 ### SYS-04: Configure Script Missing for System Libraries
 
@@ -1248,11 +1403,12 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### SYS-06: Contradictory C++ Standard Between SystemRequirements and Makevars
 
 - **Severity**: WARNING
-- **Rule**: The C++ standard specified in `SystemRequirements` (e.g., "C++17") must be consistent with the `CXX_STD` setting in `src/Makevars*`. R CMD check validates this since R 4.5 and issues a warning for contradictory specifications.
+- **Rule**: The C++ standard specified in `SystemRequirements` (e.g., "C++17") must be consistent with the `CXX_STD` setting in `src/Makevars*`. R CMD check validates this since R 4.5.3 (2026-03-11) and issues a warning for contradictory specifications.
 - **CRAN says**: "C++ standard specifications (CXX_STD = in 'src/Makevars*' and in the SystemRequirements field of the 'DESCRIPTION' file) are now checked more thoroughly. Invalid values are still ignored but now give a warning, as do contradictory specifications."
 - **Detection**: Parse SystemRequirements for C++ standard mentions (e.g., "C++17", "C++20", "C++11"). Parse `src/Makevars*` for `CXX_STD` setting. Flag if they contradict (e.g., SystemRequirements says C++17 but Makevars says CXX20). Also flag deprecated `SystemRequirements: C++11`.
 - **Fix**: Ensure SystemRequirements and Makevars CXX_STD agree. Best practice: specify only in Makevars (`CXX_STD`), not in SystemRequirements, unless human-readable documentation is desired.
 - **Files**: `DESCRIPTION`, `src/Makevars`, `src/Makevars.win`
+- **Since**: R 4.5.3 (2026-03-11) — the quoted text is from the R 4.5.3 NEWS
 
 ### SYS-07: USE_C17 Opt-Out for C23 Keyword Conflicts
 
@@ -1306,8 +1462,8 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 ### EMAIL-05: Institutional Email Longevity Warning
 
 - **Severity**: NOTE
-- **Rule**: Institutional email addresses (.edu, .ac.uk, .edu.au, etc.) are valid but higher risk of becoming undeliverable when the maintainer changes institutions. This is the #1 cause of CRAN package archival.
-- **CRAN says**: "Too many people let their maintainer addresses run out of service." (Uwe Ligges, R-package-devel)
+- **Rule**: Institutional email addresses (.edu, .ac.uk, .edu.au, etc.) are valid but higher risk of becoming undeliverable when the maintainer changes institutions. This is the #1 cause of CRAN package archival. Feb-Sep 2026: about 405 packages were archived for undeliverable maintainer email, 278 of them between 2026-04-30 and 2026-05-14. This was the single largest archival reason in that window. The mechanism behind the April/May wave was not announced (UNVERIFIED; it looks like a bulk deliverability sweep). Uwe Ligges also noted that outlook.com frequently blocks CRAN/win-builder mail (2026-08-08).
+- **CRAN says**: "Too many people let their maintainer addresses run out of service." (Uwe Ligges, R-package-devel) / "Archived on 2026-05-04 as email to the maintainer is undeliverable." (CRAN `X-CRAN-Comment`)
 - **Detection**: Flag emails from university/academic domains: .edu, .ac.uk, .ac.jp, .edu.au, .edu.cn, .uni-*.de, and similar academic TLD patterns.
 - **Fix**: Consider using a stable personal email (Gmail, ProtonMail, custom domain) alongside or instead of the institutional address. If using an institutional email, update all CRAN packages promptly when changing institutions.
 - **Files**: `DESCRIPTION`
@@ -1378,3 +1534,21 @@ Sources: CRAN Repository Policy, CRAN Submission Checklist, CRAN Cookbook (R Con
 - **Detection**: Calculate total size of each subdirectory under `inst/`. Flag any subdirectory exceeding 1MB. Flag individual files over 500KB. Identify potentially compressible files (uncompressed CSV, BMP images, uncompressed text).
 - **Fix**: Compress data files (use xz or bzip2 for CSV/text). Reduce image resolution. Move large datasets to a separate data package. Use `tools::R_user_dir()` for runtime-downloaded data (R >= 4.0). Consider hosting data externally with download-on-demand.
 - **Files**: `inst/extdata/`, `inst/*/`
+
+---
+
+## R-devel Watch List (not yet enforced on CRAN release)
+
+Changes visible in R-devel (future R 4.7.0), CRAN check configuration or R Core discussion as of 2026-10-05. Promote to rules once released or enforced.
+
+- **ENC-01 / DESCRIPTION read as UTF-8**: "read.dcf() and write.dcf() now treat DCF files (such as package 'DESCRIPTION' ...) as UTF-8 ... non-UTF-8 'DESCRIPTION' files (e.g. those declaring 'Encoding: latin1') are no longer re-encoded on reading." `Encoding: latin1` is effectively obsolete; use UTF-8. Revisit ENC-01 when R 4.7.0 is released. (R-devel NEWS, https://cran.r-project.org/doc/manuals/r-devel/NEWS.html)
+- **VIG-09 (proposed) / PDF vignettes with missing BibTeX references**: NOTE when re-building Sweave/LaTeX vignettes whose `\cite{}` keys are missing from the `.bib` files; detect by comparing `\cite{key}` keys with `\bibliography{}` files in `vignettes/*.Rnw`. "tools::texi2pdf() now reports BibTeX warnings; in particular, missing references are now noted by R CMD check when re-building PDF vignettes." (R-devel NEWS)
+- **Exported functions without usage**: trunk `--as-cran` sets `_R_CHECK_CODOC_FUNCTIONS_MISSING_FROM_USAGES_=NA` (reported as INFO; NOTE when set true); CRAN's `check.Renviron` sets it too. Not in NEWS. (https://svn.r-project.org/R/trunk/src/library/tools/R/check.R)
+- **Obsolete `data/datalist`**: "R CMD build now excludes an obsolete 'data/datalist' file when the package uses 'LazyData', and reports when it added one." Relevant to DATA-03. (R-devel NEWS)
+- **`.Rbuildignore` applied before copying**: broken symlinks matching an exclude pattern no longer break `R CMD build`. (R-devel NEWS)
+- **`structure()` attribute names**: `.Dim`, `.Dimnames`, `.Names`, `.Tsp` and `.Label` are deprecated. (R-devel NEWS)
+- **`rbinom()` fix**: reproducing old results needs `RNGversion("4.6")`; may change test snapshots. (R-devel NEWS)
+- **Duplicate packages in Imports/Suggests**: Kurt Hornik found 18 CRAN packages and said "I'll take a look ..."; may become a check. (https://stat.ethz.ch/pipermail/r-devel/2026-June/084618.html)
+- **CITATION call whitelisting**: after DESC-16, Hornik: "The harder part will be narrowing down the calls allowed in CITATION files" (relates to INST-02). (https://stat.ethz.ch/pipermail/r-devel/2026-April/084480.html)
+- **`data/*.R` scripts that load their own namespace**: break vignette-engine detection under R CMD check (Ivan Krylov). (https://stat.ethz.ch/pipermail/r-devel/2026-August/084669.html)
+- **Source-level detection of top-level side-effect calls in R/**: Hornik is looking into making `tools:::.check_packages_used()` catch top-level `library()`/`install.packages()` calls (see NS-08, CODE-13). (https://stat.ethz.ch/pipermail/r-devel/2026-June/084612.html)

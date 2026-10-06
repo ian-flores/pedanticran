@@ -121,6 +121,23 @@ Common CRAN feedback → Rule ID mapping:
 | "cargo" or "vendor" or Rust dependencies | COMP-09 |
 | "rate limit" or HTTP 429/403 | NET-03 |
 | "section titles" in NEWS or NEWS format | MISC-06 |
+| "possibly unsafe calls" in Authors@R | DESC-16 |
+| "divisive or give offence" or "political message" | CODE-23 |
+| "~/.cache" or "new files in some other directories" | CODE-24 |
+| "Rcpp:::LdFlags" or "has not been needed since 2013" | COMP-13 |
+| missing `std::` declarations, "clang23", `<algorithm>`/`<iterator>` | COMP-14 |
+| "disable compiler diagnostics" or `-Wno-` flags | COMP-15 |
+| "checking relative paths in package URLs" | DOC-12 |
+| "Bibentries cited but not shown" or "Rebuild with R >= 4.6.0" | DOC-13 |
+| "formally depend on 'R >= 4.6.0'" | DOC-14 |
+| "\\arguments should not be documented without \\usage" | DOC-15 |
+| "big-sur-arm64" / "darwin20" / macOS arm64 install failure | PLAT-03 |
+| "linux-arm64" additional issues or precision-dependent test failures | PLAT-04 |
+| "::: calls to the package's namespace" | NS-09 |
+| "Bioconductor software repository" or strong dep on BioC data package | DEP-01 |
+| "On Internet access" or "fail gracefully" | NET-01 |
+| "email to the maintainer is undeliverable" | EMAIL-05 |
+| "requirement for Rust versions" or recent "rustc" | COMP-09 |
 
 ### Step 4: Produce Fixes
 
@@ -201,27 +218,31 @@ Guidelines for the comment:
 After presenting the analysis, ask:
 "Would you like me to apply these fixes now? I can run `/cran-fix` to handle the mechanical ones and walk you through the rest."
 
-## Common R 4.5+ Rejection Patterns
+## Common R 4.5+ / 4.6 Rejection Patterns
 
-R 4.5.0 (April 2025) introduced several new checks. If the rejection references compiled code issues, these are the most common:
+R 4.5.0 (April 2025) and R 4.6.0 (April 2026) introduced several new checks. If the rejection references compiled code issues, these are the most common:
 
 1. **C23 compilation failures** — `bool`, `true`, `false` are now keywords. Packages redefining them break. Fix: remove redefinitions or add `SystemRequirements: USE_C17`.
 
 2. **R_NO_REMAP in C++** — Bare R API names like `error()`, `length()` no longer compile. Fix: add `Rf_` prefix.
 
-3. **Non-API entry points** — Functions like `SET_TYPEOF`, `VECTOR_PTR` now generate WARNINGs (previously NOTEs). Fix: migrate to supported API.
+3. **Non-API entry points** — In R 4.6.0, entry points like `SET_TYPEOF`, `ATTRIB`, `R_nchar` generate WARNINGs, and about 33 others (`TRUELENGTH`, `NAMED`, `OBJECT`, `VECTOR_PTR`, ...) are hidden, so compilation fails. Fix: migrate to the supported API (see COMP-03 for replacements).
 
 4. **sprintf deprecation** — `sprintf` in C/C++ is flagged on all platforms. Fix: use `snprintf`.
 
 5. **Configure script bashisms** — `/bin/bash` and bash-specific syntax in configure scripts. Fix: use `/bin/sh` and POSIX syntax.
 
-6. **C++11/C++14 deprecated** — `CXX_STD = CXX11` in Makevars generates notes. Fix: remove the line.
+6. **C++11/C++14 defunct** — R 4.6.0 removed C++11/C++14 support; `CXX_STD = CXX11` and `CXX11FLAGS`-style variables are defunct. Fix: remove the lines (C++20 is the default where available; request C++17 if essential).
 
 7. **Lost braces (R 4.3+/4.4)** — Unescaped literal braces in Rd files. Affected 3000+ packages. Fix: escape with `\{` `\}` or upgrade roxygen2 >= 7.3.0.
 
 8. **Strict C prototypes (R 4.4+)** — Empty parameter lists in C function declarations. Fix: add `void`.
 
 9. **Fortran KIND portability** — Hardcoded KIND values flagged. Fix: use `SELECTED_INT_KIND()`/`SELECTED_REAL_KIND()`.
+
+10. **Obsolete Rcpp flags (R 4.6.0)** — `Rcpp:::LdFlags()` in Makevars is a significant WARNING. Fix: delete the line; `LinkingTo: Rcpp` is enough.
+
+11. **Missing C++ headers (clang 23, from Sept 2026)** — `std::` names reported as undeclared because libc++ dropped transitive includes. Fix: `#include` each standard header you use, most often `<algorithm>` or `<iterator>`.
 
 These often appear together in packages with compiled code. If CRAN flags one, check for all of them.
 

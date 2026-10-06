@@ -141,6 +141,21 @@ Replace: int foo(void)
 ```
 - Only fix declarations/definitions, not function calls
 
+**FIX-RCPP-FLAGS: Remove obsolete Rcpp linker/compiler flags** (COMP-13)
+```
+Search: src/Makevars, src/Makevars.win, src/Makevars.ucrt, src/Makevars.in
+Pattern: lines using $(shell ... Rcpp:::LdFlags()), RcppLdFlags, RcppLdPath, Rcpp:::CxxFlags()
+Replace: Remove the line (keep LinkingTo: Rcpp in DESCRIPTION)
+```
+- If the line also adds other flags, remove only the Rcpp part
+
+**FIX-OWN-NAMESPACE: Drop ::: on the package's own functions** (NS-09)
+```
+Search: R/*.R
+Pattern: <Package>:::fn (Package from DESCRIPTION)
+Replace: fn
+```
+
 #### Tier 2: Safe With Minor Judgment (Apply, But Show Changes)
 
 These have a clear correct direction but may need tweaking.
@@ -235,6 +250,35 @@ Replace: Use SELECTED_INT_KIND()/SELECTED_REAL_KIND()
 ```
 - Show each replacement since the right KIND depends on needed precision
 
+**FIX-AUTHORS-CALLS: Rewrite Authors@R to allowed calls** (DESC-16)
+```
+Read: DESCRIPTION Authors@R
+Pattern: calls other than person/c/list/paste/paste0/as.person, e.g. comment(ORCID = ...), ORCID = ... as a person() argument, personList()
+Replace: person(..., comment = c(ORCID = "...")); personList() -> c()
+```
+
+**FIX-CXX-HEADERS: Add missing standard C++ includes** (COMP-14)
+```
+Search: src/*.cpp, src/*.cc, src/*.h, src/*.hpp
+Pattern: std:: names whose header is not included directly (std::sort -> <algorithm>, std::back_inserter -> <iterator>, size_t -> <cstddef>, ...)
+Replace: Add the #include near the other standard includes
+```
+- Show each added include; the identifier-to-header mapping is heuristic
+
+**FIX-RD-USAGE: Resolve \arguments without \usage** (DOC-15)
+```
+Search: man/*.Rd, R/*.R (roxygen)
+Pattern: Rd with \arguments{} but no \usage{}
+Replace: Add #' @usage fn(args), or move parameter text to \describe{} in @details
+```
+
+**FIX-RD-R46: Declare R >= 4.6.0 for new Rd syntax** (DOC-14)
+```
+Search: man/*.Rd for \linkS4class[pkg]{}, \linkS4methods{}, \manual{}{}, \bibcitet/\bibcitep/\bibshow
+Replace: Add or raise Depends: R (>= 4.6.0) in DESCRIPTION
+```
+- Show the change: the alternative is reverting to the old \link[pkg:Class-class]{} form so the package keeps supporting older R
+
 #### Tier 3: Requires User Input (Ask Before Fixing)
 
 These need human judgment. Ask the user what they want.
@@ -320,6 +364,33 @@ Pattern: HTTP request functions without rate-limiting
 ```
 - Ask user about appropriate delay between requests
 - Suggest exponential backoff pattern, response caching, Retry-After header support
+
+**FIX-DIVISIVE: Remove divisive or political content** (CODE-23)
+```
+Search: R/zzz.R, R/*.R, DESCRIPTION, README.md, inst/
+Pattern: Startup messages or text flagged by the audit as non-package content
+```
+- Never remove on your own judgment: show the flagged text and ask the user
+
+**FIX-USER-CACHE: Bound the user cache** (CODE-24)
+```
+Search: R/*.R for R_user_dir(, rappdirs::user_cache_dir(, ~/.cache
+```
+- Ask the user for a size cap and expiry policy; add a cache-clear function
+- Redirect the cache to tempdir() in examples, tests and vignettes
+
+**FIX-MACOS-PATHS: Replace hard-coded macOS arm64 paths** (PLAT-03)
+```
+Search: configure*, src/Makevars*, tools/
+Pattern: darwin20/arm64, big-sur-arm64, arm64 -mmacosx-version-min=11
+```
+- Ask before changing: derive paths from R CMD config or pkg-config instead
+
+**FIX-MIN-R-VERSION: Correct an inflated minimum R version** (DESC-17)
+```
+Read: DESCRIPTION Depends: R (>= x.y.z)
+```
+- Ask the user what feature requires the version; suggest patch level 0 and the lowest version that passes checks
 
 ### Step 3: Regenerate Documentation
 

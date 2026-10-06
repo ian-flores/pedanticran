@@ -5,7 +5,7 @@
 > **Beta**
 > This project is in beta. Checks may have false positives and the API may change. Use it as a supplement to — not a replacement for — reading the [CRAN Repository Policy](https://cran.r-project.org/web/packages/policies.html) yourself.
 
-**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 141 CRAN rules (compiled from a decade of mailing list rejections, 2015–2025) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
+**pedanticran** catches the policy violations that `R CMD check` misses — the ones that get your package rejected with a terse two-line email. It encodes 155 CRAN rules (compiled from over a decade of mailing list rejections, 2015 through September 2026) with verbatim rejection text, so you can fix issues before a human reviewer finds them.
 
 Works as a **Claude Code plugin** (interactive) or a **GitHub Action** (CI).
 
@@ -76,17 +76,17 @@ Then in Claude Code, inside your R package directory (as a plugin the commands a
 
 ## What it checks
 
-141 rules across 19 categories, sourced from a decade (2015–2025) of CRAN mailing list rejections, policy revisions, and R release notes:
+155 rules across 19 categories, sourced from over a decade (2015 through September 2026) of CRAN mailing list rejections, policy revisions, and R release notes (through R 4.6.1):
 
 | Category | Rules | Examples |
 |----------|------:|---------|
-| DESCRIPTION | 15 | Title case, quoting software names, valid Authors@R, license format, stale Date field, smart quotes |
-| Code Behavior | 22 | T/F literals, print→message, options/par without on.exit, staged install paths, stringsAsFactors, class(matrix()), if-condition length |
-| Compiled Code | 12 | C23 keywords, R_NO_REMAP, native routine registration, ASAN/UBSAN compliance, UCRT toolchain, Rust vendoring |
-| Documentation | 11 | Missing @return, \dontrun misuse, \donttest execution under --as-cran, lost braces (R 4.3+), HTML5 Rd validation |
+| DESCRIPTION | 17 | Title case, quoting software names, valid Authors@R, license format, stale Date field, smart quotes |
+| Code Behavior | 24 | T/F literals, print→message, options/par without on.exit, staged install paths, stringsAsFactors, class(matrix()), if-condition length |
+| Compiled Code | 15 | C23 keywords, R_NO_REMAP, native routine registration, ASAN/UBSAN compliance, UCRT toolchain, Rust vendoring |
+| Documentation | 15 | Missing @return, \dontrun misuse, \donttest execution under --as-cran, lost braces (R 4.3+), HTML5 Rd validation |
 | Licensing | 3 | License validity, license changes, dual licensing prohibition |
 | Size & Performance | 2 | Tarball size (10MB), check time (10 min) |
-| Cross-Platform | 2 | Multi-platform support, no binary executables |
+| Cross-Platform | 4 | Multi-platform support, no binary executables |
 | Dependencies | 3 | Strong deps on CRAN, conditional Suggests, dependency health monitoring |
 | Internet | 3 | Graceful failure, HTTPS, rate limit policy (rev6277) |
 | Submission | 7 | R CMD check, multi-platform testing, reverse deps, vacation periods |
@@ -94,7 +94,7 @@ Then in Claude Code, inside your R package directory (as a plugin the commands a
 | Miscellaneous | 7 | NEWS format, URL validity, URL redirect intolerance, spelling, .Rbuildignore, Makefile portability |
 | Encoding | 8 | Missing Encoding field, non-ASCII in R source, BOM detection, \x escape sequences |
 | Vignettes | 8 | VignetteBuilder declaration, metadata, stale inst/doc, build dependencies, html_document size |
-| NAMESPACE | 8 | Import conflicts, importFrom preference, S3 method registration, broad exportPattern, Depends misuse, no library() in package code |
+| NAMESPACE | 9 | Import conflicts, importFrom preference, S3 method registration, broad exportPattern, Depends misuse, no library() in package code |
 | Data | 9 | Undocumented datasets, LazyData configuration, compression, size limits, invalid formats |
 | System Requirements | 7 | Undeclared system libraries, external programs, C++ standard consistency, Java source requirements |
 | Maintainer Email | 6 | Mailing list detection, disposable domains, placeholder addresses, noreply patterns |
@@ -115,7 +115,7 @@ Every rule includes the verbatim CRAN rejection text, so you know exactly what r
 
 **Outputs:** `issues`, `errors`, `warnings`, `notes` — use in downstream steps.
 
-The checker is pure Python (stdlib only). No R, no compiled dependencies. Covers all 141 rules across DESCRIPTION, R code, C/C++/Fortran, Makevars, configure scripts, documentation, encoding, vignettes, NAMESPACE, data, system requirements, maintainer email, and inst/ directory. Pass `--online` to also validate URLs, check spelling, and verify dependencies exist on CRAN.
+The checker is pure Python (stdlib only). No R, no compiled dependencies. Covers the original 141 rules across DESCRIPTION, R code, C/C++/Fortran, Makevars, configure scripts, documentation, encoding, vignettes, NAMESPACE, data, system requirements, maintainer email, and inst/ directory. Pass `--online` to also validate URLs, check spelling, and verify dependencies exist on CRAN. The 14 rules added in the 2026 update (R 4.6 changes, new policy text, 2026 rejection patterns) are in the knowledge base used by the Claude Code skills but are not yet implemented in the checker.
 
 ## How `/cran-fix` works
 
@@ -139,7 +139,7 @@ Paste your rejection email. pedanticran:
 
 ## How it complements R CMD check and devtools
 
-pedanticran is not a replacement for `R CMD check` — it catches what `R CMD check` misses. Of 141 rules, many are unique to pedanticran and checked by no other automated tool in the R ecosystem.
+pedanticran is not a replacement for `R CMD check` — it catches what `R CMD check` misses. Of 155 rules, many are unique to pedanticran and checked by no other automated tool in the R ecosystem.
 
 `devtools::check()` is a convenience wrapper around `R CMD check` — it adds zero additional policy checks. `goodpractice` covers about 10–15% of pedanticran's unique rules. The full gap analysis is in [`research/devtools-comparison.md`](research/devtools-comparison.md).
 

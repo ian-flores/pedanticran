@@ -37,6 +37,8 @@ Read the full CRAN rules knowledge base for reference. Locate `cran-rules.md` in
 
 Run checks in this order, from highest to lowest rejection risk. For each issue found, cite the rule ID from the knowledge base.
 
+The lists below are the highest-signal checks, not the full set. After working through them, apply the **Detection** field of every remaining rule in the knowledge base that is relevant to this package (e.g. skip compiled-code rules if there is no `src/`).
+
 #### 3a. DESCRIPTION File Checks (Most Common Rejections)
 
 Read the `DESCRIPTION` file and check:
@@ -76,6 +78,10 @@ Read the `DESCRIPTION` file and check:
 14. **DESC-14: Version size** — Any version component > 9000?
 
 15. **DESC-15: Straight quotes** — Any smart/curly/directed quotes (Unicode \u2018-\u201D) in DESCRIPTION?
+
+16. **DESC-16: Authors@R calls** — Parse `Authors@R` without evaluating it. Any function other than `person`, `c`, `list`, `paste`, `paste0`, `as.person`? Flag `comment(` and a named `ORCID =` argument to `person()`.
+
+17. **DESC-17: Minimum R version** — Is `Depends: R (>= x.y.z)` a real version, with patch level 0, and justified by something the package uses? Inflated minimums cascade to reverse dependencies.
 
 #### 3b. Code Checks
 
@@ -123,6 +129,10 @@ Also check `src/` if it exists:
 
 17. **CODE-17: UseLTO** — Check DESCRIPTION for `UseLTO` field
 
+18. **CODE-23: Divisive material** — Read `.onAttach`/`.onLoad` startup messages, DESCRIPTION, README and printed strings for political slogans or other non-package content. Report as "review manually"; never treat it as automatic failure.
+
+19. **CODE-24: User cache** — Find `R_user_dir(`, `rappdirs::user_cache_dir(` and literal `~/.cache`. Flag a cache with no size cap or pruning, or one that examples, tests or vignettes write to instead of `tempdir()`.
+
 #### 3b2. Compiled Code Checks (R 4.5+)
 
 If `src/` directory exists with C/C++/Fortran files, run these additional checks:
@@ -131,19 +141,27 @@ If `src/` directory exists with C/C++/Fortran files, run these additional checks
 
 2. **COMP-02: R_NO_REMAP** — Grep src/*.cpp for bare R API calls without Rf_ prefix: `\berror\(`, `\blength\(`, `\bwarning\(`, `\bmkChar\(`
 
-3. **COMP-03: Non-API entry points** — Grep src/ for: IS_LONG_VEC, PRCODE, PRENV, PRVALUE, R_nchar, SET_TYPEOF, TRUELENGTH, VECTOR_PTR
+3. **COMP-03: Non-API entry points** — Grep src/ for the three tiers in the knowledge base. Hidden or removed in R 4.6.0, so compilation fails: TRUELENGTH, SETLENGTH, NAMED, OBJECT, IS_S4_OBJECT, VECTOR_PTR, Rf_isFrame, DATAPTR, FRAME, ENCLOS, HASHTAB and the rest of that list. WARNING: ATTRIB, SET_ATTRIB, R_nchar, R_tryWrap, SET_TYPEOF, STRING_PTR, PRCODE, PRENV, PRVALUE, Rf_findVarInFrame3 and others. Also flag `#include <R_ext/PrtUtil.h>`
 
 4. **COMP-04: Implicit declarations** — Informational flag if src/ has .c files: remind about C23 implicit function declaration errors
 
 5. **COMP-05: Configure portability** — If configure or cleanup script exists, check for `#!/bin/bash` shebang and bashisms (`[[`, `]]`, `${var/`)
 
-6. **COMP-06: Deprecated C++ std** — Grep src/Makevars and src/Makevars.win for `CXX_STD\s*=\s*CXX1[14]`
+6. **COMP-06: Defunct C++ std** — Grep src/Makevars*, configure* for `CXX_STD\s*=\s*CXX1[14]` and `CXX1[14](FLAGS|PICFLAGS|STD)?`, `SHLIBCXX1[14]LD`. R 4.6.0 removed C++11/C++14 support.
 
 7. **COMP-07: Strict prototypes** — Grep src/*.c, src/*.h for function declarations with empty parens: `\w+\s*\(\s*\)` that should be `\w+(void)`
 
 8. **COMP-08: Fortran KIND** — If src/*.f or src/*.f90 exist, grep for `KIND\s*=\s*\d+`, `INTEGER\*\d+`, `REAL\*\d+`
 
-9. **COMP-09: Rust packaging** — If Cargo.toml exists, check for vendor/ directory, configure script printing rustc version, AUTHORS file
+9. **COMP-09: Rust packaging** — If Cargo.toml exists, check for vendor/ directory, configure script printing rustc version, AUTHORS file, and a conservative `rust-version` (packages were archived in 2026 for recent rustc requirements)
+
+10. **COMP-13: Obsolete Rcpp flags** — Grep src/Makevars* for `Rcpp:::LdFlags`, `RcppLdFlags`, `RcppLdPath`, `Rcpp:::CxxFlags`. A significant WARNING under --as-cran since R 4.6.0.
+
+11. **COMP-14: Missing C++ headers** — For C++ files, flag standard-library names used without their header included directly (e.g. `std::sort` without `<algorithm>`, `std::back_inserter` without `<iterator>`). clang 23 (r-devel) no longer pulls these in transitively.
+
+12. **COMP-15: Suppressed diagnostics** — Grep src/Makevars* for `-Wno-`, `-w`, `-fpermissive` and src/ for `#pragma (GCC|clang) diagnostic ignored`.
+
+13. **PLAT-03: macOS arm64 paths** — Grep configure*, src/Makevars*, tools/ for `darwin20/arm64`, `big-sur-arm64`, arm64 `macosx-version-min=1[0-3]`. CRAN arm64 binaries target macOS 14 from R 4.6.0.
 
 #### 3c. Documentation Checks
 
@@ -161,6 +179,14 @@ If `src/` directory exists with C/C++/Fortran files, run these additional checks
 
 7. **DOC-09: HTML5 validation** — Grep man/*.Rd for deprecated HTML elements (`<font>`, `<center>`, `<strike>`).
 
+8. **DOC-12: Relative links** — Flag scheme-less `\href{}`/`\url{}` targets in man/*.Rd and relative links in vignettes that point to files the package does not install.
+
+9. **DOC-13: Rd bibliography** — If man/*.Rd uses `\bibcitet{}`/`\bibcitep{}`, every cited key must appear in a `\bibshow{}`.
+
+10. **DOC-14: R 4.6.0 Rd syntax** — If man/*.Rd uses `\linkS4class[pkg]{}`, `\linkS4methods{}`, `\manual{}{}` or the `\bib*` macros, DESCRIPTION must have `Depends: R (>= 4.6.0)`.
+
+11. **DOC-15: \arguments without \usage** — Flag any man/*.Rd with `\arguments{` but no `\usage{`.
+
 #### 3d. Structure Checks
 
 1. **MISC-01: NEWS.md** — Does it exist?
@@ -174,12 +200,14 @@ If `src/` directory exists with C/C++/Fortran files, run these additional checks
 9. **NET-03: Rate limiting** — If package makes HTTP requests, check for rate-limiting awareness (retry logic, backoff, caching)
 10. **LIC-03: Dual licensing** — Check for per-file license headers differing from DESCRIPTION License field
 11. **MISC-06: NEWS format** — If NEWS.md exists, verify version headings match standard format
+12. **PLAT-04: Precision-sensitive tests** — Flag tests comparing floating-point results with `tolerance = 0` or `identical()`. CRAN now shows linux-arm64 results (no extended precision) in incoming pretests.
 
 #### 3e. Dependency Checks
 
-1. **DEP-01: Dependencies** — Parse Depends/Imports/LinkingTo. Flag any that aren't obviously CRAN/Bioconductor packages.
+1. **DEP-01: Dependencies** — Parse Depends/Imports/LinkingTo. Flag any that aren't obviously CRAN or Bioconductor *software* packages. Bioconductor annotation and experiment-data packages are allowed only in Suggests/Enhances (policy r6734).
 2. **DEP-02: Conditional Suggests** — Check if Suggests packages are used with `requireNamespace()`.
 3. **DEP-03: Dependency health** — Informational reminder to check CRAN status of all dependencies. Note cascading archival risk.
+4. **NS-09: Own-namespace `:::`** — Grep R/*.R for `<Package>:::` (the package's own name from DESCRIPTION).
 
 ### Step 4: Produce the Report
 

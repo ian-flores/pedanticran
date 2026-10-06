@@ -10,8 +10,8 @@
     {
       "name": "pedanticran",
       "source": "./",
-      "description": "Catch the CRAN policy violations that R CMD check misses: audit, auto-fix, and rejection-email response skills backed by 141 CRAN rules.",
-      "version": "1.0.0",
+      "description": "Catch the CRAN policy violations that R CMD check misses: audit, auto-fix, and rejection-email response skills backed by 155 CRAN rules (2015 through September 2026).",
+      "version": "1.1.0",
       "category": "development"
     }
   ]
