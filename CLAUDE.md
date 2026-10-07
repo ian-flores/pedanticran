@@ -4,14 +4,14 @@ A Claude Code plugin that helps R package developers survive CRAN submission.
 
 ## Project Structure
 
-- `knowledge/cran-rules.md` — 155 rules across 19 categories (check.py implements 150; not yet: CODE-23, COMP-14, CODE-24, PLAT-04, DESC-17), with verbatim rejection text
+- `knowledge/cran-rules.md` — 155 rules across 19 categories (check.py implements 154; CODE-23 is manual review only), with verbatim rejection text
 - `skills/cran-audit/SKILL.md` — The `/cran-audit` skill: reads an R package and produces a pre-submission report
 - `skills/cran-fix/SKILL.md` — The `/cran-fix` skill: tiered auto-remediation (mechanical → reviewed → user input)
 - `skills/cran-respond/SKILL.md` — The `/cran-respond` skill: parses CRAN rejection emails and drafts resubmission
-- `action/check.py` — Python static analyzer covering 150 of the 155 rules (no R dependency)
+- `action/check.py` — Python static analyzer covering 154 of the 155 rules (no R dependency)
 - `action.yml` — GitHub Action definition (at the repo root so `uses: ian-flores/pedanticran@v1` resolves)
 - `.claude-plugin/` — plugin manifest and single-plugin marketplace; bump `version` in both on release
-- `tests/` — 297 pytest tests with 3 fixture R packages (clean, problematic, edge-cases)
+- `tests/` — 331 pytest tests with 3 fixture R packages (clean, problematic, edge-cases)
 - `research/` — Mailing list and policy analysis reports (2015 through September 2026) and checker validation
 - `install.sh` — Manual install (non-plugin) into `~/.claude/skills/<name>/SKILL.md`
 
@@ -52,4 +52,4 @@ All four phases are implemented:
 
 Knowledge base sourced from CRAN mailing list rejections and policy changes, 2015 through September 2026.
 Validated against dplyr (large) and glosario (small) — see `research/checker-validation.md`.
-CI runs 297 pytest tests on Python 3.11/3.12, plus a job that runs the action itself, via `.github/workflows/test.yml`.
+CI runs 331 pytest tests on Python 3.11/3.12, plus a job that runs the action itself, via `.github/workflows/test.yml`.

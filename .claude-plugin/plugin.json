@@ -1,6 +1,6 @@
 {
   "name": "pedanticran",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Catch the CRAN policy violations that R CMD check misses. /pedanticran:cran-audit finds them, /pedanticran:cran-fix fixes what it safely can, /pedanticran:cran-respond turns a CRAN rejection email into a fix plan and resubmission comments.",
   "author": {
     "name": "ian-flores"

@@ -7,6 +7,6 @@ Maintainer: Bob Smith <bob@example.com>
 Description: This package does stuff.
 License: GPL-3 + file LICENSE
 LazyData: true
-Depends: R (>= 3.5.0), dplyr
+Depends: R (>= 3.5.1), dplyr
 Imports: ggplot2
 Suggests: testthat

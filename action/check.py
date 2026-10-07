@@ -743,6 +743,559 @@ def _parse_sysreqs_cxx_standard(desc: dict) -> str | None:
     return None
 
 
+# --- C++ standard header helpers (COMP-14) ---
+
+# Curated std:: names whose declaring header is unambiguous. Names that many
+# headers declare (size_t, pair, move, swap, string, begin/end, less, hash,
+# abs, the <stdexcept> exceptions) are deliberately left out to keep COMP-14 quiet.
+_CXX_HEADER_NAMES = {
+    "algorithm": "sort stable_sort partial_sort nth_element find find_if find_if_not count count_if "
+                 "max_element min_element minmax_element transform unique reverse fill fill_n copy "
+                 "copy_if copy_n remove_if replace replace_if lower_bound upper_bound binary_search "
+                 "equal_range all_of any_of none_of for_each merge set_intersection set_union "
+                 "set_difference rotate shuffle is_sorted min max minmax clamp",
+    "iterator": "back_inserter front_inserter inserter distance advance next prev istream_iterator "
+                "ostream_iterator istreambuf_iterator ostreambuf_iterator iterator_traits "
+                "back_insert_iterator make_move_iterator move_iterator",
+    "type_traits": "is_same enable_if decay remove_reference remove_cv remove_const remove_pointer "
+                   "add_const add_pointer conditional integral_constant true_type false_type "
+                   "is_integral is_floating_point is_arithmetic is_pointer is_const is_base_of "
+                   "is_convertible is_enum is_class is_void is_signed is_unsigned underlying_type "
+                   "is_trivially_copyable is_fundamental make_unsigned make_signed void_t "
+                   "is_reference is_constructible is_default_constructible invoke_result result_of",
+    "limits": "numeric_limits",
+    "numeric": "accumulate iota inner_product partial_sum adjacent_difference gcd lcm reduce "
+               "transform_reduce exclusive_scan inclusive_scan",
+    "memory": "unique_ptr shared_ptr weak_ptr make_unique make_shared enable_shared_from_this",
+    "functional": "function bind placeholders greater greater_equal mem_fn reference_wrapper",
+    "cmath": "sqrt pow exp log log10 log2 log1p expm1 fabs floor ceil round trunc isnan isinf "
+             "isfinite lgamma tgamma sin cos tan asin acos atan atan2 sinh cosh tanh fmod hypot "
+             "erf erfc cbrt fmin fmax copysign signbit",
+    "cstring": "memcpy memset memmove memcmp strlen strcmp strncmp strcpy strncpy strcat strchr "
+               "strrchr strstr strerror",
+    "cstdlib": "malloc calloc realloc free exit abort atoi atof atol strtol strtoul strtod qsort getenv",
+    "cstdio": "printf fprintf snprintf sprintf fopen fclose fflush puts fputs",
+    "ctime": "time clock clock_t tm localtime gmtime strftime difftime mktime",
+    "sstream": "ostringstream istringstream stringstream",
+    "iomanip": "setw setprecision setfill",
+    "vector": "vector", "map": "map multimap", "set": "set multiset",
+    "unordered_map": "unordered_map", "unordered_set": "unordered_set", "list": "list",
+    "deque": "deque", "queue": "queue priority_queue", "stack": "stack", "array": "array",
+    "tuple": "tuple make_tuple tie", "thread": "thread", "mutex": "mutex lock_guard unique_lock",
+    "atomic": "atomic", "chrono": "chrono", "regex": "regex regex_match regex_search regex_replace",
+    "complex": "complex", "optional": "optional", "bitset": "bitset", "fstream": "ifstream ofstream fstream",
+    "random": "mt19937 mt19937_64 random_device uniform_int_distribution uniform_real_distribution "
+              "normal_distribution default_random_engine",
+    "exception": "exception_ptr current_exception rethrow_exception make_exception_ptr nested_exception "
+                 "throw_with_nested rethrow_if_nested uncaught_exceptions",
+}
+_CXX_NAME_TO_HEADER = {n: h for h, names in _CXX_HEADER_NAMES.items() for n in names.split()}
+
+_CXX_STD_HEADERS = set(
+    "algorithm any array atomic barrier bit bitset cassert cctype cerrno cfenv cfloat charconv chrono "
+    "cinttypes ciso646 climits clocale cmath codecvt compare complex concepts condition_variable "
+    "coroutine csetjmp csignal cstdarg cstdbool cstddef cstdint cstdio cstdlib cstring ctgmath ctime "
+    "cuchar cwchar cwctype deque exception execution expected filesystem format forward_list fstream "
+    "functional future initializer_list iomanip ios iosfwd iostream istream iterator latch limits list "
+    "locale map mdspan memory memory_resource mutex new numbers numeric optional ostream print queue "
+    "random ranges ratio regex scoped_allocator semaphore set shared_mutex source_location span "
+    "sstream stack stacktrace stdexcept stop_token streambuf string string_view strstream syncstream "
+    "system_error thread tuple type_traits typeindex typeinfo unordered_map unordered_set utility "
+    "valarray variant vector version stdfloat".split())
+_C_STD_HEADERS = set(
+    "assert ctype errno fenv float inttypes iso646 limits locale math setjmp signal stdarg stdbool "
+    "stddef stdint stdio stdlib string tgmath time uchar wchar wctype".split())
+
+# Standard headers that are required (or, in libc++, need) to provide another one
+_CXX_IMPLIED = {
+    "iostream": {"istream", "ostream", "ios"}, "queue": {"deque", "vector"}, "stack": {"deque"},
+}
+
+# R's headers include these C++ headers when compiled as C++ (R.h, Rinternals.h, R_ext/RS.h, ...)
+_R_HEADER_PROVIDES = {"cstdlib", "cstdio", "cmath", "climits", "cstddef", "cstring", "cstdarg", "cfloat"}
+
+# Standard headers that umbrella headers from LinkingTo packages include directly
+# (taken from Rcpp 1.1, RcppArmadillo 15 and cpp11 0.5 sources, plus R's headers)
+# (computed from Rcpp 1.1, RcppArmadillo 15 and cpp11 0.5 sources). Other umbrella
+# headers, e.g. RcppEigen.h or BH, are unknown and silence COMP-14 for that file.
+_RCPPCOMMON_PROVIDES = _R_HEADER_PROVIDES | set(
+    "algorithm cassert complex csetjmp deque exception functional initializer_list iomanip ios "
+    "iostream istream iterator limits list map numeric ostream set sstream stdexcept streambuf "
+    "string string_view type_traits typeinfo unordered_map unordered_set utility vector".split())
+_RCPP_PROVIDES = _RCPPCOMMON_PROVIDES  # Rcpp.h adds only Rcpp headers (and <time.h>, not <ctime>)
+_RCPPARMADILLO_PROVIDES = _RCPP_PROVIDES | {
+    "atomic", "chrono", "cstdint", "ctime", "fstream", "memory", "mutex", "new", "random"}
+_CPP11_PROVIDES = _R_HEADER_PROVIDES | set(
+    "algorithm array cctype cerrno csetjmp cstdint cwchar exception initializer_list iterator limits "
+    "locale memory ostream stdexcept string string_view system_error tuple type_traits utility".split())
+_UMBRELLA_PROVIDES = {
+    "Rcpp.h": _RCPP_PROVIDES, "Rcpp/Rcpp": _RCPP_PROVIDES, "RcppCommon.h": _RCPPCOMMON_PROVIDES,
+    "Rcpp/Light": _RCPP_PROVIDES, "Rcpp/Lighter": _RCPP_PROVIDES, "Rcpp/Lightest": _RCPP_PROVIDES,
+    "RcppArmadillo.h": _RCPPARMADILLO_PROVIDES, "RcppArmadillo/Lighter": _RCPPARMADILLO_PROVIDES,
+    "cpp11.hpp": _CPP11_PROVIDES,
+}
+
+# Platform headers that provide no C++ standard library declarations
+_INERT_HEADER_RE = re.compile(
+    r'^(?:unistd|pthread|omp|windows|fcntl|dirent|sched|dlfcn|io|direct|process|malloc|strings|'
+    r'alloca|libgen|pwd|glob|termios|netdb|winsock2|ws2tcpip|execinfo|cxxabi|intrin)\.h$|^(?:sys|arpa|netinet|mach|mach-o)/')
+
+
+def _strip_c_comments_and_strings(text: str) -> str:
+    """Blank out C/C++ comments and string/char literals, keeping line breaks."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if ch == "/" and nxt == "/":
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if ch == "/" and nxt == "*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append("\n" * text.count("\n", i, j))
+            i = j
+            continue
+        if ch in "\"'":
+            j = i + 1
+            while j < n and text[j] not in (ch, "\n"):
+                j += 2 if text[j] == "\\" else 1
+            out.append(ch + ch)
+            i = j + 1 if j < n and text[j] == ch else j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+class _CxxIncludeGraph:
+    """Resolve which standard headers each C/C++ file in a package can see."""
+
+    WILDCARD = "*"
+
+    def __init__(self, roots: list[Path]):
+        self.roots = roots
+        self._parsed: dict[Path, tuple[list[tuple[str, bool]], list[tuple[str, int]]]] = {}
+        self._avail: dict[Path, set[str]] = {}
+        self._resolved: dict[tuple[str, bool, Path], Path | None] = {}
+        self.includers: dict[Path, set[Path]] = {}
+
+    def parse(self, f: Path):
+        """Return ([(include, is_angle)], [(std_name, line)]) for a file."""
+        if f not in self._parsed:
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                text = ""
+            includes = [(m.group(2), m.group(1) == "<") for m in
+                        re.finditer(r'^[ \t]*#[ \t]*include[ \t]*([<"])([^>"\n]+)[>"]', text, re.M)]
+            uses = []
+            for lnum, line in enumerate(_strip_c_comments_and_strings(text).splitlines(), 1):
+                if "std" in line:
+                    uses.extend((m.group(1), lnum) for m in re.finditer(r'\bstd\s*::\s*(\w+)', line))
+            self._parsed[f] = (includes, uses)
+        return self._parsed[f]
+
+    def _local(self, name: str, angle: bool, from_file: Path) -> Path | None:
+        key = (name, angle, from_file.parent)
+        if key not in self._resolved:
+            self._resolved[key] = None
+            for d in ([] if angle else [from_file.parent]) + self.roots:
+                p = d / name
+                if p.is_file():
+                    self._resolved[key] = p.resolve()
+                    break
+        return self._resolved[key]
+
+    def provides(self, name: str, angle: bool, from_file: Path) -> tuple[set[str], Path | None]:
+        """Standard headers made visible by one #include, plus the local file it resolves to."""
+        if not angle:
+            local = self._local(name, angle, from_file)
+            if local:
+                return set(), local
+        if name in _CXX_STD_HEADERS:
+            return {name} | _CXX_IMPLIED.get(name, set()), None
+        if name.endswith(".h") and name[:-2] in _C_STD_HEADERS:
+            return set(), None  # <math.h> declares ::sqrt, not std::sqrt
+        local = self._local(name, angle, from_file)
+        if local:
+            return set(), local
+        if name in _UMBRELLA_PROVIDES:
+            return set(_UMBRELLA_PROVIDES[name]), None
+        if re.match(r'R(?:internals|math|defines|version|config|embedded|interface)?\.h$|R_ext/', name):
+            return set(_R_HEADER_PROVIDES), None
+        if _INERT_HEADER_RE.search(name):
+            return set(), None
+        return {self.WILDCARD}, None
+
+    def available(self, f: Path) -> set[str]:
+        """Standard headers visible in f through its own (transitive, local) includes."""
+        if f in self._avail:
+            return self._avail[f]
+        self._avail[f] = acc = set()  # guards include cycles
+        for name, angle in self.parse(f)[0]:
+            hdrs, local = self.provides(name.strip(), angle, f)
+            acc |= hdrs
+            if local:
+                self.includers.setdefault(local, set()).add(f)
+                acc |= self.available(local)
+        return acc
+
+    def _prefix(self, f: Path, target: Path) -> set[str]:
+        """Standard headers f has made visible before its #include of target."""
+        acc = set()
+        for name, angle in self.parse(f)[0]:
+            hdrs, local = self.provides(name.strip(), angle, f)
+            if local == target:
+                break
+            acc |= hdrs
+            if local:
+                acc |= self.available(local)
+        return acc
+
+    def satisfied(self, f: Path, header: str) -> bool:
+        """True if f sees the header itself, or every file including f makes it visible first."""
+        avail = self.available(f)
+        return header in avail or self.WILDCARD in avail or self._context_has(f, header, frozenset())
+
+    def _context_has(self, f: Path, header: str, active: frozenset) -> bool:
+        includers = self.includers.get(f, set()) - active
+        if not includers:
+            return bool(self.includers.get(f))  # only reached through an include cycle
+        for inc in includers:
+            pre = self._prefix(inc, f)
+            if not (header in pre or self.WILDCARD in pre
+                    or self._context_has(inc, header, active | {f})):
+                return False
+        return True
+
+
+def _cxx_header_for(name: str) -> str | None:
+    """Map a std:: name (including _t/_v trait aliases) to its declaring header."""
+    if name in _CXX_NAME_TO_HEADER:
+        return _CXX_NAME_TO_HEADER[name]
+    base = re.sub(r'_[tv]$', '', name)
+    if base != name and _CXX_NAME_TO_HEADER.get(base) == "type_traits":
+        return "type_traits"
+    return None
+
+
+def _check_missing_cxx_headers(path: Path) -> list[Finding]:
+    """COMP-14: std:: names used without directly including their header."""
+    src_dir, inc_dir = path / "src", path / "inst" / "include"
+    roots = [d.resolve() for d in (src_dir, inc_dir) if d.is_dir()]
+    if not roots:
+        return []
+    # -I paths relative to src/ from Makevars (e.g. -Ivendor/lib, -I../inst/include)
+    for mv in find_makevars_files(path):
+        try:
+            mv_text = mv.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        for m in re.finditer(r'(?<!\S)-I\s*([^\s$"\'`]+)', mv_text):
+            d = (src_dir / m.group(1)).resolve()
+            if d.is_dir() and d not in roots and str(d).startswith(str(path.resolve())):
+                roots.append(d)
+    exts = {".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".hxx", ".ipp", ".tpp", ".inl"}
+    files = [f for f in sorted(src_dir.rglob("*")) if f.is_file() and f.suffix.lower() in exts] if src_dir.is_dir() else []
+    graph_only = []
+    if inc_dir.is_dir():
+        for f in sorted(inc_dir.rglob("*")):
+            if f.is_file() and f.suffix.lower() in exts:
+                files.append(f)
+            elif f.is_file() and "." not in f.name:
+                graph_only.append(f)  # e.g. inst/include/armadillo
+    graph = _CxxIncludeGraph(roots)
+    inc_root = inc_dir.resolve()
+    files = [f.resolve() for f in files]
+    for f in files + [g.resolve() for g in graph_only]:
+        graph.available(f)  # builds the includer map
+    findings = []
+    root = path.resolve()
+    for f in files:
+        # A header that sees no standard header at all is a fragment spliced into its
+        # includer's context (e.g. via a macro #include); it cannot be judged on its own.
+        is_header = f.suffix.lower() not in (".cpp", ".cc", ".cxx")
+        if is_header and not graph.available(f):
+            continue
+        # A src/ header nobody includes is most likely reached through an -I path we
+        # could not resolve (e.g. -I$(PKGROOT)/include); only inst/include is public API.
+        if is_header and not graph.includers.get(f) and inc_root not in f.parents:
+            continue
+        missing: dict[str, list[tuple[str, int]]] = {}
+        for name, lnum in graph.parse(f)[1]:
+            header = _cxx_header_for(name)
+            if header:
+                missing.setdefault(header, []).append((name, lnum))
+        for header, uses in missing.items():
+            if graph.satisfied(f, header):
+                continue
+            names = list(dict.fromkeys("std::" + n for n, _ in uses))
+            shown = ", ".join(names[:4]) + (", ..." if len(names) > 4 else "")
+            findings.append(Finding(
+                rule_id="COMP-14", severity="warning",
+                title=f"Missing #include <{header}>",
+                message=f"Uses {shown} without including <{header}> (directly or via a package header). "
+                        f"Standard headers need not include each other, and libc++ in LLVM 23 dropped many such transitive includes.",
+                file=str(f.relative_to(root)), line=uses[0][1],
+                cran_says="if declaration(s) (especially in std:) are reported as missing, do ensure that "
+                          "the header(s) which declare them are included. Most commonly <algorithm> or "
+                          "<iterator> is missing."
+            ))
+    return findings
+
+
+# --- R heuristics helpers (CODE-24, PLAT-04, DESC-17) ---
+
+# Released R versions: highest minor per major. Update each April with the x.y.0 release.
+R_RELEASED_MINORS = {1: 9, 2: 15, 3: 6, 4: 6}
+R_OLDREL = (4, 5)
+
+# Rd macros added in R 4.6.0 (DOC-14)
+R46_RD_SYNTAX = r'\\linkS4class\[|\\linkS4methods\{|\\manual\{|\\bibcite[tp]\{|\\bibshow\{|\\bibinfo\{'
+
+_R_FUNC_DEF = re.compile(r'^\s*`?([\w.]+)`?\s*(?:<-|<<-|=)\s*function\b')
+_CACHE_CLEAR_NAME = re.compile(
+    r'(?:cache|cached)[._]?(?:clear|prune|delete|flush|reset|purge|clean|remove|rm|wipe|evict)'
+    r'|(?:clear|prune|delete|flush|reset|purge|clean|remove|rm|wipe|evict)[._]?(?:the[._]|all[._])?cache',
+    re.I)
+_CACHE_PRUNE_CALL = re.compile(
+    r'\b(?:unlink|file\.remove|dir_delete|file_delete|file\.size|file\.info|file\.mtime|'
+    r'dir_info|file_info|file_size)\s*\(')
+_SOLARIS_COMMAND = re.compile(r'/bin/kstat|/usr/sbin/psrinfo|/usr/sbin/prtconf|/usr/sbin/prtdiag')
+_OS_SNIFF = re.compile(r'R\.version\s*\$\s*os|R\.version\s*\[\[|Sys\.info\s*\(\s*\)\s*\[|\.Platform\s*\$\s*OS\.type')
+
+
+def _r_function_spans(code_lines: list[str]) -> list[tuple[str, int, int]]:
+    """Find `name <- function` definitions as (name, start_line, end_line), 1-indexed."""
+    spans = []
+    open_defs: list[list] = []  # [name, start, brace_depth_at_start, saw_brace]
+    depth = 0
+    for i, line in enumerate(code_lines, 1):
+        m = _R_FUNC_DEF.match(line)
+        if m:
+            open_defs.append([m.group(1), i, depth, False])
+        for ch in line:
+            if ch == "{":
+                if open_defs and not open_defs[-1][3] and depth == open_defs[-1][2]:
+                    open_defs[-1][3] = True
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                while open_defs and open_defs[-1][3] and depth <= open_defs[-1][2]:
+                    name, start, _, _ = open_defs.pop()
+                    spans.append((name, start, i))
+        # Brace-less body: the def line itself, or the line after `function(...)`
+        if open_defs and not open_defs[-1][3]:
+            name, start = open_defs[-1][0], open_defs[-1][1]
+            if i > start or not re.search(r'function\s*\([^()]*\)\s*$', line):
+                open_defs.pop()
+                spans.append((name, start, i))
+    return spans
+
+
+def _check_user_cache(path: Path) -> list[Finding]:
+    """CODE-24: user cache directory without any pruning logic (one finding per package)."""
+    files = []
+    for rf in find_r_files(path):
+        try:
+            raw = rf.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            continue
+        files.append((rf, raw, [strip_r_strings_and_comment(ln) for ln in raw]))
+
+    first_use = None
+    ids: set[str] = set()
+    for rf, raw, code in files:
+        spans = _r_function_spans(code)
+        for i, (raw_line, code_line) in enumerate(zip(raw, code), 1):
+            live = raw_line[:len(code_line)]  # drop trailing comment, keep string contents
+            hit = (re.search(r'\bR_user_dir\s*\(', code_line)
+                   and re.search(r'R_user_dir\s*\([^)]*["\']cache["\']', live))
+            hit = hit or re.search(r'user_cache_dir\s*\(', code_line) or re.search(r'~/\.cache\b', live)
+            if not hit:
+                continue
+            if first_use is None:
+                first_use = (rf, i, raw_line.strip())
+            lhs = re.match(r'^\s*([\w.$]+)\s*(?:<-|<<-|=)', code_line)
+            if lhs:
+                ids.add(lhs.group(1).split("$")[-1])
+            ids.update(name for name, s, e in spans if s <= i <= e)
+    if first_use is None:
+        return []
+
+    def mentions(text: str, names: set[str]) -> bool:
+        return any(re.search(r'(?<![\w.])' + re.escape(n) + r'(?![\w.])', text) for n in names)
+
+    bodies = []  # (function name or "", body lines)
+    for _, _, code in files:
+        for name, s, e in _r_function_spans(code):
+            bodies.append((name, code[s - 1:e]))
+        bodies.extend(("", [line]) for line in code)
+    if any(_CACHE_CLEAR_NAME.search(name) for name, _ in bodies if name):
+        return []
+    ids |= {name for name, body in bodies if name and mentions("\n".join(body), ids)}  # one level of helpers
+    for _, body in bodies:
+        # A prune call counts only if it touches the cache: e.g. unlink(files[old]) after
+        # files <- list.files(cache_dir()); unlink(tempfile) in the downloader does not
+        local = set(ids)
+        for line in body:
+            if _CACHE_PRUNE_CALL.search(line) and mentions(line, local):
+                return []
+            lhs = re.match(r'^\s*([\w.]+)\s*(?:<-|=)', line)
+            if lhs and mentions(line[lhs.end():], local):
+                local.add(lhs.group(1))
+
+    rf, lnum, line = first_use
+    return [Finding(
+        rule_id="CODE-24", severity="warning",
+        title="User cache without size limit or cleanup",
+        message=f"Writes to a per-user cache but no code prunes it (no unlink/file.remove or size/age "
+                f"check on the cache, no cache_clear()-style function). Cap its size, expire old files, "
+                f"and keep R CMD check from writing to it: `{line[:80]}`",
+        file=str(rf.relative_to(path)), line=lnum,
+        cran_says="provided that by default sizes are kept as small as possible and the contents are "
+                  "actively managed (including removing outdated material)."
+    )]
+
+
+def _enclosing_r_call(code: str, pos: int) -> str:
+    """Name of the call whose parentheses enclose position pos, or ''."""
+    depth = 0
+    for k in range(pos - 1, -1, -1):
+        if code[k] == ")":
+            depth += 1
+        elif code[k] == "(":
+            if depth == 0:
+                m = re.search(r'([\w.]+)\s*$', code[:k])
+                return m.group(1).split("::")[-1] if m else ""
+            depth -= 1
+    return ""
+
+
+def _split_r_args(args: str) -> list[str]:
+    """Split an R argument list on top-level commas."""
+    parts, depth, cur = [], 0, []
+    for ch in args:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return [p.strip() for p in parts]
+
+
+def _is_float_literal(arg: str) -> bool:
+    """True for a positional/expected argument that is a non-integer numeric literal (0.3, 1/3, c(0.1, 2))."""
+    m = re.match(r'^(?:expected|target|current|object)\s*=\s*(.*)$', arg, re.S)
+    if m:
+        arg = m.group(1).strip()
+    elif re.match(r'^[\w.]+\s*=(?!=)', arg):
+        return False
+    elems = _split_r_args(arg[2:-1]) if re.match(r'^c\(.*\)$', arg, re.S) else [arg]
+    number = r'-?\s*(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?'
+    if not all(re.fullmatch(number + r'(?:\s*/\s*' + number + ')?', e) for e in elems):
+        return False
+    return any(re.fullmatch(r'-?\s*(?:\d*\.\d*[1-9]\d*|\d+[eE]-\d+)(?:[eE][+-]?\d+)?|.*/.*', e) for e in elems)
+
+
+def _test_files(path: Path) -> list[Path]:
+    """R files under tests/ and inst/tinytest/."""
+    files = []
+    for d in (path / "tests", path / "inst" / "tinytest"):
+        if d.is_dir():
+            files.extend(f for f in d.rglob("*") if f.is_file() and f.suffix in (".R", ".r"))
+    return sorted(files)
+
+
+def _check_precision_tests(path: Path) -> list[Finding]:
+    """PLAT-04: exact-tolerance comparisons in tests and OS sniffing that ends in Solaris commands."""
+    findings = []
+    test_files = _test_files(path)
+    for tf in test_files:
+        try:
+            raw = tf.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            continue
+        code = "\n".join(strip_r_strings_and_comment(ln) for ln in raw)
+        for m in re.finditer(r'(?<![\w.])(?:expect_equal|expect_equivalent|all\.equal)\s*\(', code):
+            depth, j = 0, m.end() - 1
+            while j < len(code):
+                depth += {"(": 1, ")": -1}.get(code[j], 0)
+                if depth == 0:
+                    break
+                j += 1
+            call = code[m.start():j + 1]
+            if not re.search(r'\btol(?:erance)?\s*=\s*0(?:\.0*)?(?:[eE][+-]?\d+)?\s*[,)]', call):
+                continue
+            # all.equal() only asserts inside stopifnot()/isTRUE()/expect_true(); bare calls are diagnostics
+            if call.startswith("all.equal") and _enclosing_r_call(code, m.start()) not in (
+                    "stopifnot", "isTRUE", "expect_true", "assert_that", "expect_identical"):
+                continue
+            # Exact tolerance is fine for conversions and integer-valued results; flag only
+            # comparisons against a non-integer literal such as 0.3 or 1/3
+            if any(_is_float_literal(arg) for arg in _split_r_args(call[call.index("(") + 1:-1])):
+                lnum = code.count("\n", 0, m.start()) + 1
+                findings.append(Finding(
+                    rule_id="PLAT-04", severity="note",
+                    title="Floating-point test with tolerance = 0",
+                    message=f"Exact comparison of a floating-point result with a decimal value can fail on arm64 "
+                            f"(no extended precision) and with other BLAS/compilers. Use a tolerance: `{raw[lnum - 1].strip()[:80]}`",
+                    file=str(tf.relative_to(path)), line=lnum,
+                    cran_says="The arm CPUs used by Macs only support double precision, so any operations "
+                              "that are otherwise preformed with extended precision will be different."
+                ))
+
+    for f in find_r_files(path) + test_files:
+        try:
+            raw = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            continue
+        live = [ln[:len(strip_r_strings_and_comment(ln))] for ln in raw]
+        if not any(_OS_SNIFF.search(ln) for ln in live):
+            continue
+        for i, line in enumerate(live, 1):
+            if not _SOLARIS_COMMAND.search(line) or re.search(r'solaris|sunos', line, re.I):
+                continue
+            # Nearest enclosing branch: an explicit Solaris-only `if` is fine, an `else` falls through
+            guard = ""
+            for prev in reversed(live[max(0, i - 15):i]):
+                if re.search(r'\bif\s*\(|\belse\b', prev):
+                    guard = prev
+                    break
+            cond = guard[guard.rfind("if"):] if re.search(r'\bif\s*\(', guard) else ""
+            if cond and re.search(r'solaris|sunos', cond, re.I) and not re.search(
+                    r'darwin|linux|windows|mingw|unix|bsd', cond, re.I):
+                continue
+            findings.append(Finding(
+                rule_id="PLAT-04", severity="note",
+                title="OS detection falls through to a Solaris-only command",
+                message=f"This branch runs a Solaris command on platforms the OS test did not anticipate "
+                        f"(e.g. linux-arm64). Handle each OS explicitly and error otherwise: `{raw[i - 1].strip()[:80]}`",
+                file=str(f.relative_to(path)), line=i,
+                cran_says="Additional issues checked: linux-arm64"
+            ))
+    return findings
+
+
+def _feature_min_r_version(path: Path) -> tuple[int, int] | None:
+    """Lowest R version required by detectable package features (only R 4.6.0 Rd syntax for now)."""
+    for rd in find_rd_files(path):
+        try:
+            if re.search(R46_RD_SYNTAX, rd.read_text(encoding="utf-8", errors="replace")):
+                return (4, 6)
+        except Exception:
+            continue
+    return None
+
+
 # --- Email helpers ---
 
 DISPOSABLE_EMAIL_DOMAINS = {
@@ -1204,6 +1757,32 @@ def check_description_fields(path: Path, desc: dict) -> list[Finding]:
                 message="ORCID = ... is not a person() argument. Use comment = c(ORCID = \"0000-...\").",
                 file=desc_file,
                 cran_says="Malformed Authors@R field."
+            ))
+
+    # DESC-17: Honest minimum R version
+    depends_r = parse_depends_r_version(desc)
+    if depends_r:
+        major, minor = depends_r[0], depends_r[1] if len(depends_r) > 1 else 0
+        declared = ".".join(map(str, depends_r))
+        latest = max(R_RELEASED_MINORS)
+        message = ""
+        if major not in R_RELEASED_MINORS or minor > R_RELEASED_MINORS[major]:
+            message = (f"R {major}.{minor} does not exist (the latest release is R {latest}.{R_RELEASED_MINORS[latest]}). "
+                       f"Declare the lowest real R version the package works with.")
+        elif any(depends_r[2:]):
+            message = (f"R (>= {declared}) has a non-zero patch level. ABI compatibility is guaranteed across patch "
+                       f"versions, so use R (>= {major}.{minor}.0) unless a bug fixed in {declared} affects the package.")
+        elif (major, minor) > R_OLDREL and (_feature_min_r_version(path) or (0, 0)) < (major, minor):
+            message = (f"R (>= {declared}) excludes r-oldrel (R {R_OLDREL[0]}.{R_OLDREL[1]}) and every reverse "
+                       f"dependency on it, but no feature needing it was detected. Make sure the package really "
+                       f"fails on older R.")
+        if message:
+            findings.append(Finding(
+                rule_id="DESC-17", severity="note",
+                title=f"Questionable minimum R version: R (>= {declared})",
+                message=message,
+                file=desc_file,
+                cran_says="it really means \"you're not allowed to install it, it won't work\""
             ))
 
     # CODE-17: UseLTO causes CPU time NOTE
@@ -2162,6 +2741,15 @@ def check_code(path: Path, desc: dict | None = None) -> list[Finding]:
                 cran_says="R 4.6.0 CRAN arm64 builds use Xcode 26.0.1, macOS 14 target and 14.4 SDK with package type mac.binary.sonoma-arm64."
             ))
 
+    # COMP-14: Missing standard C++ headers (libc++ / LLVM 23)
+    findings.extend(_check_missing_cxx_headers(path))
+
+    # CODE-24: Unbounded user cache
+    findings.extend(_check_user_cache(path))
+
+    # PLAT-04: Precision-sensitive tests and Solaris fall-through
+    findings.extend(_check_precision_tests(path))
+
     # NET-03: Rate Limit Policy (heuristic reminder)
     has_network_code = False
     for rf in r_files:
@@ -2596,7 +3184,7 @@ def check_documentation(path: Path, desc: dict) -> list[Finding]:
     depends_r = parse_depends_r_version(desc)
     own_pkg = desc.get("Package", "")
     vignette_stems = {vf.stem for vf in _find_vignette_files(path)}
-    new_rd_syntax = r'\\linkS4class\[|\\linkS4methods\{|\\manual\{|\\bibcite[tp]\{|\\bibshow\{|\\bibinfo\{'
+    new_rd_syntax = R46_RD_SYNTAX
     for rd in rd_files:
         rel = str(rd.relative_to(path))
         try:

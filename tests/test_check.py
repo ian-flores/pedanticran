@@ -3626,6 +3626,7 @@ class TestHttpHeadNoRedirect:
 NEW_2026_RULES = {
     "COMP-13", "COMP-15", "NS-09", "DESC-16",
     "DOC-12", "DOC-13", "DOC-14", "DOC-15", "PLAT-03",
+    "COMP-14", "CODE-24", "PLAT-04", "DESC-17",
 }
 
 
@@ -3776,3 +3777,264 @@ class TestNew2026Rules:
         comp13 = self._by_rule(pkg, "COMP-13")
         assert sorted(f.file for f in comp13) == ["src/Makevars.ucrt", "src/Makevars.win"]
         assert all(f.severity == "warning" for f in comp13)
+
+
+# ============================================================================
+# 2026 heuristic rules: COMP-14, CODE-24, PLAT-04, DESC-17
+# ============================================================================
+
+
+class TestHeuristic2026Rules:
+    """Fixture and synthetic tests for the conservative 2026 heuristics."""
+
+    def _by_rule(self, pkg, rule_id):
+        return [f for f in _all_offline_findings(pkg) if f.rule_id == rule_id]
+
+    def _pkg(self, tmp_path, depends="R (>= 4.1.0)"):
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "DESCRIPTION").write_text(
+            "Package: testpkg\n"
+            "Title: A Test Package for Unit Testing\n"
+            "Version: 0.1.0\n"
+            'Authors@R: person("A", "B", email = "a.b@gmail.com", role = c("aut", "cre"))\n'
+            "Description: Provides test functionality for unit testing purposes.\n"
+            "    This is a second sentence for the description field.\n"
+            "License: MIT + file LICENSE\n"
+            f"Depends: {depends}\n"
+        )
+        return pkg
+
+    def _write(self, pkg, rel, text):
+        f = pkg / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+
+    # --- Fixture packages ---
+
+    def test_comp14_problematic(self, problematic_pkg):
+        comp14 = self._by_rule(problematic_pkg, "COMP-14")
+        assert sorted((f.file, f.line, f.title) for f in comp14) == [
+            ("src/sorter.cpp", 4, "Missing #include <algorithm>"),
+            ("src/sorter.cpp", 6, "Missing #include <iterator>"),
+            ("src/sorter.cpp", 7, "Missing #include <numeric>"),
+        ]
+        assert all(f.severity == "warning" for f in comp14)
+        algo = next(f for f in comp14 if "<algorithm>" in f.title)
+        assert "std::sort" in algo.message and "std::copy" in algo.message
+
+    def test_code24_problematic(self, problematic_pkg):
+        code24 = self._by_rule(problematic_pkg, "CODE-24")
+        assert [(f.file, f.line, f.severity) for f in code24] == [("R/cache.R", 2, "warning")]
+
+    def test_plat04_problematic(self, problematic_pkg):
+        plat04 = self._by_rule(problematic_pkg, "PLAT-04")
+        assert sorted((f.file, f.line) for f in plat04) == [
+            ("tests/testthat/test-precision.R", 2),
+            ("tests/testthat/test-precision.R", 4),
+            ("tests/testthat/test-precision.R", 11),
+        ]
+        assert all(f.severity == "note" for f in plat04)
+
+    def test_desc17_problematic(self, problematic_pkg):
+        desc17 = self._by_rule(problematic_pkg, "DESC-17")
+        assert len(desc17) == 1
+        assert desc17[0].severity == "note"
+        assert "3.5.0" in desc17[0].message
+
+    # --- COMP-14 ---
+
+    def test_comp14_header_include_chain(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "inst/include/testpkg/base.h", "#include <algorithm>\n")
+        self._write(pkg, "inst/include/testpkg.h", "#include <testpkg/base.h>\n")
+        self._write(pkg, "src/a.cpp", '#include "../inst/include/testpkg.h"\nvoid f(int* x) { std::sort(x, x + 2); }\n')
+        self._write(pkg, "src/b.cpp", "#include <testpkg.h>\nint g(int a) { return std::max(a, 1); }\n")
+        assert self._by_rule(pkg, "COMP-14") == []
+
+    def test_comp14_header_satisfied_by_includer(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "src/impl.h", "#include <vector>\nint top(std::vector<int>& x) { return *std::max_element(x.begin(), x.end()); }\n")
+        self._write(pkg, "src/a.cpp", '#include <algorithm>\n#include "impl.h"\n')
+        assert self._by_rule(pkg, "COMP-14") == []
+        # A src/ header nobody includes may sit behind an unresolved -I path: skipped
+        self._write(pkg, "src/a.cpp", "int main() { return 0; }\n")
+        assert self._by_rule(pkg, "COMP-14") == []
+        # A public inst/include header is checked on its own
+        self._write(pkg, "inst/include/impl.h", (pkg / "src" / "impl.h").read_text())
+        assert [f.file for f in self._by_rule(pkg, "COMP-14")] == ["inst/include/impl.h"]
+
+    def test_comp14_include_order_matters(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        # dp.h is first reached through common.h, before any <cmath>
+        self._write(pkg, "src/dp.h", "#include <limits>\ninline double f(double x) { return std::fabs(x); }\n")
+        self._write(pkg, "src/common.h", '#include "dp.h"\n#include <cmath>\n')
+        self._write(pkg, "src/a.cpp", '#include "common.h"\n')
+        self._write(pkg, "src/b.cpp", '#include <cmath>\n#include "dp.h"\n')
+        assert [(f.file, f.title) for f in self._by_rule(pkg, "COMP-14")] == [
+            ("src/dp.h", "Missing #include <cmath>")]
+        self._write(pkg, "src/common.h", '#include <cmath>\n#include "dp.h"\n')
+        assert self._by_rule(pkg, "COMP-14") == []
+
+    def test_comp14_c_header_does_not_declare_std(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "src/a.cpp", "#include <time.h>\n#include <exception>\n"
+                    "double t() { std::clock_t c = std::clock(); return c; }\n")
+        self._write(pkg, "src/b.cpp", "#include <Rcpp.h>\nstd::exception_ptr p = std::current_exception();\n")
+        assert sorted((f.file, f.title) for f in self._by_rule(pkg, "COMP-14")) == [
+            ("src/a.cpp", "Missing #include <ctime>")]
+
+    def test_comp14_makevars_include_path_and_subdirs(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "src/Makevars", "PKG_CPPFLAGS = -Ivendor/lib -DNDEBUG\n")
+        self._write(pkg, "src/vendor/lib/Client.h", "#include <vector>\n")
+        self._write(pkg, "src/vendor/lib/Client.cpp",
+                    '#include "Client.h"\nbool f(std::vector<int> v) { return std::any_of(v.begin(), v.end(), [](int x) { return x; }); }\n')
+        self._write(pkg, "src/glue.cpp", "#include <Client.h>\n#include <algorithm>\n")
+        assert [(f.file, f.line) for f in self._by_rule(pkg, "COMP-14")] == [("src/vendor/lib/Client.cpp", 2)]
+
+    def test_comp14_header_fragment_skipped(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        # Spliced in via a macro #include, so it never sees its includer's headers
+        self._write(pkg, "inst/include/testpkg/meat.h", "inline double r(double w) { return std::sqrt(w); }\n")
+        self._write(pkg, "inst/include/testpkg/glue.h", '#include "testpkg/meat.h"\n')
+        assert self._by_rule(pkg, "COMP-14") == []
+
+    def test_comp14_unknown_header_is_conservative(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "src/a.cpp", "#include <boost/math/foo.hpp>\nvoid f(int* x) { std::sort(x, x + 2); }\n")
+        self._write(pkg, "src/b.cpp", '#include "generated_config.h"\nint g() { return std::numeric_limits<int>::max(); }\n')
+        assert self._by_rule(pkg, "COMP-14") == []
+
+    def test_comp14_umbrella_sets(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "src/a.cpp", "#include <Rcpp.h>\nvoid f(int* x) { std::sort(x, x + 2); std::accumulate(x, x, 0); }\n")
+        self._write(pkg, "src/b.cpp", "#include <R.h>\n#include <Rinternals.h>\ndouble g(double x) { return std::sqrt(x); }\n")
+        self._write(pkg, "src/c.cpp", "#include <RcppArmadillo.h>\nvoid h(int* x) { std::sort(x, x + 2); }\n")
+        assert self._by_rule(pkg, "COMP-14") == []
+        self._write(pkg, "src/d.cpp", "#include <R.h>\nvoid k(int* x) { std::sort(x, x + 2); }\n")
+        assert [f.file for f in self._by_rule(pkg, "COMP-14")] == ["src/d.cpp"]
+
+    def test_comp14_type_traits_suffix_forms(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "src/a.cpp", "#include <vector>\ntemplate <class T> using D = std::decay_t<T>;\n"
+                    "static_assert(std::is_same_v<int, int>, \"\");\n")
+        comp14 = self._by_rule(pkg, "COMP-14")
+        assert [f.title for f in comp14] == ["Missing #include <type_traits>"]
+        assert comp14[0].line == 2
+
+    # --- CODE-24 ---
+
+    def test_code24_rappdirs_and_literal(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "R/a.R", "# '~/.cache' in a comment\nx <- 1\npath <- function() rappdirs::user_cache_dir('testpkg')\n")
+        self._write(pkg, "R/b.R", 'p <- function() file.path("~/.cache", "testpkg")\n')
+        code24 = self._by_rule(pkg, "CODE-24")
+        assert [(f.file, f.line) for f in code24] == [("R/a.R", 3)]
+
+    def test_code24_pruning_via_variable(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "R/a.R",
+                    'the_cache <- tools::R_user_dir("testpkg", "cache")\n'
+                    "reset <- function() {\n  unlink(the_cache, recursive = TRUE)\n}\n")
+        assert self._by_rule(pkg, "CODE-24") == []
+
+    def test_code24_unrelated_unlink_does_not_count(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "R/a.R",
+                    'cdir <- function() tools::R_user_dir("testpkg", which = "cache")\n'
+                    "tidy <- function(f) {\n  unlink(f)\n}\n")
+        assert len(self._by_rule(pkg, "CODE-24")) == 1
+
+    def test_code24_downloader_tempfile_cleanup_does_not_count(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "R/a.R",
+                    "get_data <- function() {\n"
+                    '  cache_dir <- tools::R_user_dir("testpkg", which = "cache")\n'
+                    '  dest <- file.path(cache_dir, "big.rds")\n'
+                    "  tmp <- tempfile()\n"
+                    "  file.copy(tmp, dest)\n"
+                    "  file.remove(tmp)\n"
+                    "}\n")
+        assert [(f.file, f.line) for f in self._by_rule(pkg, "CODE-24")] == [("R/a.R", 2)]
+
+    def test_code24_pruning_via_derived_variable(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "R/a.R",
+                    'cdir <- function() tools::R_user_dir("testpkg", which = "cache")\n'
+                    "tidy_old <- function(days = 30) {\n"
+                    "  files <- list.files(cdir(), full.names = TRUE)\n"
+                    "  old <- difftime(Sys.time(), file.mtime(files), units = 'days') > days\n"
+                    "  unlink(files[old])\n"
+                    "}\n")
+        assert self._by_rule(pkg, "CODE-24") == []
+
+    def test_code24_data_and_config_dirs_ignored(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "R/a.R",
+                    'd <- function() tools::R_user_dir("testpkg")\n'
+                    'cfg <- function() tools::R_user_dir("testpkg", which = "config")\n')
+        assert self._by_rule(pkg, "CODE-24") == []
+
+    # --- PLAT-04 ---
+
+    def test_plat04_tinytest_and_negatives(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "inst/tinytest/test_a.R",
+                    "expect_equal(f(1), 2.5, tolerance = 0.0)\n"
+                    "expect_equal(f(1), 2.5, tolerance = 0.01)\n"
+                    "expect_equal(f(1), 2.5, tolerance = 0 + 1e-6)\n"
+                    "expect_equal(f(1), c(1e-3, 2), tolerance = 0)\n")
+        assert [(f.file, f.line) for f in self._by_rule(pkg, "PLAT-04")] == [
+            ("inst/tinytest/test_a.R", 1), ("inst/tinytest/test_a.R", 4)]
+
+    def test_plat04_exact_comparisons_that_are_fine(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "tests/a.R",
+                    "all.equal(fit1, fit2, tolerance = 0)  # diagnostic, printed only\n"
+                    "stopifnot(all.equal(as(m, 'matrix'), m2, tolerance = 0))\n"
+                    "expect_equal(nnz(x), 3, tolerance = 0)\n"
+                    "expect_equal(d, 1000 * .Machine$double.eps, tolerance = 0)\n"
+                    "stopifnot(all.equal(x, y, tolerance = 0, check.attributes = FALSE, scale = 1.5))\n")
+        assert self._by_rule(pkg, "PLAT-04") == []
+
+    def test_plat04_solaris_command_in_r_code(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "R/a.R",
+                    "mem <- function() {\n"
+                    "  if (grepl('darwin|solaris', R.version$os)) {\n"
+                    "    system('/bin/kstat -p unix:0:system_pages:physmem', intern = TRUE)\n"
+                    "  }\n}\n")
+        assert [(f.file, f.line) for f in self._by_rule(pkg, "PLAT-04")] == [("R/a.R", 3)]
+
+    def test_plat04_solaris_command_without_os_sniffing_ignored(self, tmp_path):
+        pkg = self._pkg(tmp_path)
+        self._write(pkg, "R/a.R", "info <- function() system('/usr/sbin/psrinfo', intern = TRUE)\n")
+        assert self._by_rule(pkg, "PLAT-04") == []
+
+    # --- DESC-17 ---
+
+    @pytest.mark.parametrize("depends,expected", [
+        ("R (>= 3.60)", "does not exist"),
+        ("R (>= 4.10.0)", "does not exist"),
+        ("R (>= 5.0.0)", "does not exist"),
+        ("R (>= 4.1.2)", "4.1.0"),
+        ("R (>= 4.6.0)", "r-oldrel"),
+    ])
+    def test_desc17_flags(self, tmp_path, depends, expected):
+        pkg = self._pkg(tmp_path, depends)
+        desc17 = self._by_rule(pkg, "DESC-17")
+        assert len(desc17) == 1
+        assert expected in desc17[0].message
+        assert desc17[0].severity == "note"
+
+    @pytest.mark.parametrize("depends", [
+        "R (>= 2.10)", "R (>= 3.5.0)", "R (>= 4.1)", "R (>= 4.5.0)", "methods",
+    ])
+    def test_desc17_ok(self, tmp_path, depends):
+        assert self._by_rule(self._pkg(tmp_path, depends), "DESC-17") == []
+
+    def test_desc17_r46_justified_by_rd_syntax(self, tmp_path):
+        pkg = self._pkg(tmp_path, "R (>= 4.6.0)")
+        self._write(pkg, "man/x.Rd", "\\name{x}\\title{X}\\description{\\manual{R-exts}{Foo}}\n")
+        assert self._by_rule(pkg, "DESC-17") == []

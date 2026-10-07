@@ -110,10 +110,9 @@ The full list is in [`knowledge/cran-rules.md`](knowledge/cran-rules.md).
 
 ### The GitHub Action checks fewer rules
 
-The GitHub Action checks 150 of the 155 rules. The other 5 are only used by the Claude Code commands for now:
+The GitHub Action checks 154 of the 155 rules. The one it skips is **CODE-23** (divisive or political content). Deciding that takes a person, so only the Claude Code commands look for it, and they flag it for you to review.
 
-- **CODE-23** (divisive or political content). Deciding this takes a person, so a script can't do it reliably.
-- **COMP-14** (missing C++ headers), **CODE-24** (user cache size), **PLAT-04** (tests that depend on number precision) and **DESC-17** (minimum R version). These are planned. A script can only guess at them, so they will be warnings.
+A few checks have to guess, such as missing C++ headers (COMP-14) and cache cleanup (CODE-24). These are reported as warnings or notes, never as errors.
 
 ## GitHub Action settings
 
